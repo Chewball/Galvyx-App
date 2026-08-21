@@ -1,40 +1,82 @@
 package com.galvyx.app
 
+import android.content.Context
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.graphics.Paint
+import android.graphics.pdf.PdfDocument
+import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DividerDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedButtonDefaults
+
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.galvyx.app.ui.theme.GalvyxCardElevated
 import com.galvyx.app.ui.theme.GalvyxCyan
 import com.galvyx.app.ui.theme.GalvyxTheme
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+private const val PREFS_NAME = "galvyx_local_store"
+private const val PREF_VISITS = "visits"
+private const val PREF_PROFILE = "profile"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -42,25 +84,173 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             GalvyxTheme {
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    containerColor = MaterialTheme.colorScheme.background
-                ) { innerPadding ->
-                    HomeScreen(
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+                GalvyxApp(context = this)
             }
         }
     }
 }
 
+private enum class Screen { Home, NewVisit, Recent, VisitDetail, Settings }
+private enum class DialogKind { None, Note, Device, Expense, PhotoCaption }
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier) {
+fun GalvyxApp(context: Context) {
+    val prefs = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
+    val visits = remember { mutableStateListOf<SiteVisit>().also { it.addAll(visitsFromJson(prefs.getString(PREF_VISITS, null))) } }
+    var profile by remember {
+        mutableStateOf(
+            prefs.getString(PREF_PROFILE, null)?.let { raw ->
+                runCatching { CompanyProfile.fromJson(org.json.JSONObject(raw)) }.getOrDefault(CompanyProfile())
+            } ?: CompanyProfile()
+        )
+    }
+    var screen by rememberSaveable { mutableStateOf(Screen.Home) }
+    var selectedVisitId by rememberSaveable { mutableStateOf<String?>(null) }
+    var dialog by rememberSaveable { mutableStateOf(DialogKind.None) }
+    var pendingPhotoPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
+
+    fun persistVisits() {
+        prefs.edit().putString(PREF_VISITS, visitsToJson(visits)).apply()
+    }
+
+    fun persistProfile(next: CompanyProfile) {
+        profile = next
+        prefs.edit().putString(PREF_PROFILE, next.toJson().toString()).apply()
+    }
+
+    fun upsertVisit(visit: SiteVisit) {
+        val index = visits.indexOfFirst { it.id == visit.id }
+        if (index >= 0) visits[index] = visit else visits.add(0, visit)
+        persistVisits()
+    }
+
+    fun selectedVisit(): SiteVisit? = visits.firstOrNull { it.id == selectedVisitId }
+
+    fun openVisit(visit: SiteVisit) {
+        selectedVisitId = visit.id
+        screen = Screen.VisitDetail
+    }
+
+    val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success && pendingPhotoPath != null) {
+            dialog = DialogKind.PhotoCaption
+        } else {
+            pendingPhotoPath = null
+            pendingPhotoUri = null
+        }
+    }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            if (screen != Screen.Home) {
+                TopAppBar(
+                    title = { Text(screen.title()) },
+                    navigationIcon = {
+                        TextButton(onClick = { screen = if (screen == Screen.VisitDetail) Screen.Recent else Screen.Home }) {
+                            Text("Back")
+                        }
+                    }
+                )
+            }
+        }
+    ) { innerPadding ->
+        Box(modifier = Modifier.padding(innerPadding).fillMaxSize()) {
+            when (screen) {
+                Screen.Home -> HomeScreen(
+                    visitCount = visits.size,
+                    onNewVisit = { screen = Screen.NewVisit },
+                    onRecent = { screen = Screen.Recent },
+                    onSettings = { screen = Screen.Settings }
+                )
+                Screen.NewVisit -> NewVisitScreen(
+                    defaultTechnician = profile.technicianName,
+                    onSave = { visit -> upsertVisit(visit); openVisit(visit) }
+                )
+                Screen.Recent -> RecentVisitsScreen(
+                    visits = visits,
+                    onOpen = ::openVisit,
+                    onDelete = { visit -> visits.removeAll { it.id == visit.id }; persistVisits() },
+                    onNewVisit = { screen = Screen.NewVisit }
+                )
+                Screen.VisitDetail -> selectedVisit()?.let { visit ->
+                    VisitDetailScreen(
+                        visit = visit,
+                        onAddNote = { dialog = DialogKind.Note },
+                        onAddDevice = { dialog = DialogKind.Device },
+                        onAddExpense = { dialog = DialogKind.Expense },
+                        onAddPhoto = {
+                            val created = createPhotoUri(context)
+                            if (created == null) {
+                                Toast.makeText(context, "Could not create photo file", Toast.LENGTH_LONG).show()
+                            } else {
+                                pendingPhotoPath = created.first
+                                pendingPhotoUri = created.second
+                                takePictureLauncher.launch(created.second)
+                            }
+                        },
+                        onExport = {
+                            val pdfFile = exportVisitPdf(context, visit, profile)
+                            if (pdfFile != null) sharePdf(context, pdfFile) else Toast.makeText(context, "PDF export failed", Toast.LENGTH_LONG).show()
+                        }
+                    )
+                } ?: EmptyState("Visit not found", "Go back and choose a recent site visit.")
+                Screen.Settings -> SettingsScreen(profile = profile, onSave = ::persistProfile)
+            }
+        }
+    }
+
+    val visit = selectedVisit()
+    if (visit != null) {
+        when (dialog) {
+            DialogKind.Note -> NoteDialog(
+                onDismiss = { dialog = DialogKind.None },
+                onSave = { note -> upsertVisit(visit.copy(notes = visit.notes + note)); dialog = DialogKind.None }
+            )
+            DialogKind.Device -> DeviceDialog(
+                onDismiss = { dialog = DialogKind.None },
+                onSave = { device -> upsertVisit(visit.copy(devices = visit.devices + device)); dialog = DialogKind.None }
+            )
+            DialogKind.Expense -> ExpenseDialog(
+                onDismiss = { dialog = DialogKind.None },
+                onSave = { expense -> upsertVisit(visit.copy(expenses = visit.expenses + expense)); dialog = DialogKind.None }
+            )
+            DialogKind.PhotoCaption -> PhotoCaptionDialog(
+                onDismiss = { pendingPhotoPath = null; pendingPhotoUri = null; dialog = DialogKind.None },
+                onSave = { caption ->
+                    val path = pendingPhotoPath
+                    if (path != null) upsertVisit(visit.copy(photos = visit.photos + VisitPhoto(path = path, caption = caption)))
+                    pendingPhotoPath = null
+                    pendingPhotoUri = null
+                    dialog = DialogKind.None
+                }
+            )
+            DialogKind.None -> Unit
+        }
+    }
+}
+
+private fun Screen.title(): String = when (this) {
+    Screen.Home -> "Galvyx"
+    Screen.NewVisit -> "New Site Visit"
+    Screen.Recent -> "Recent Site Visits"
+    Screen.VisitDetail -> "Visit Details"
+    Screen.Settings -> "Settings"
+}
+
+@Composable
+fun HomeScreen(
+    visitCount: Int = 0,
+    onNewVisit: () -> Unit = {},
+    onRecent: () -> Unit = {},
+    onSettings: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
+        modifier = modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -78,83 +268,62 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
             )
         }
-
         Spacer(modifier = Modifier.height(18.dp))
-
-        Text(
-            text = "Galvyx",
-            fontSize = 46.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.primary,
-            textAlign = TextAlign.Center
-        )
-
-        Text(
-            text = "Field Notes, Photos & Reports",
-            fontSize = 18.sp,
-            color = MaterialTheme.colorScheme.onBackground,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-
+        Text("Galvyx", fontSize = 46.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center)
+        Text("Field Notes, Photos & Reports", fontSize = 18.sp, color = MaterialTheme.colorScheme.onBackground, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
         Spacer(modifier = Modifier.height(32.dp))
+        CardPanel {
+            Text("Start a site visit report", fontSize = 21.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            Text("Capture notes, photos, device details, expenses, and follow-up items from the field.", fontSize = 14.sp, lineHeight = 20.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(modifier = Modifier.height(6.dp))
+            PrimaryAction("New Site Visit", onClick = onNewVisit)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                HomeSecondaryButton("Recent ($visitCount)", Modifier.weight(1f), onRecent)
+                HomeSecondaryButton("Settings", Modifier.weight(1f), onSettings)
+            }
+        }
+    }
+}
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(28.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
-            ),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(22.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "Start a site visit report",
-                    fontSize = 21.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+@Composable
+fun NewVisitScreen(defaultTechnician: String, onSave: (SiteVisit) -> Unit) {
+    var client by rememberSaveable { mutableStateOf("") }
+    var project by rememberSaveable { mutableStateOf("") }
+    var tech by rememberSaveable { mutableStateOf(defaultTechnician) }
+    var date by rememberSaveable { mutableStateOf(todayString()) }
+    var jobType by rememberSaveable { mutableStateOf("General Service Call") }
 
-                Text(
-                    text = "Capture notes, photos, device details, expenses, and follow-up items from the field.",
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+    FormColumn {
+        Text("Create the shell first, then add notes/photos/devices/expenses from the visit page.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FormTextField("Client / Site Name", client) { client = it }
+        FormTextField("Project Name", project) { project = it }
+        FormTextField("Technician Name", tech) { tech = it }
+        FormTextField("Date", date) { date = it }
+        FormTextField("Job Type", jobType) { jobType = it }
+        HintText("Common job types: General Service Call, Network Survey, Camera / Security, Access Point / Wi-Fi, Workstation Replacement, Server / Firewall, Low Voltage / Cabling, Inspection, Other")
+        PrimaryAction("Save Site Visit") {
+            if (client.isBlank() && project.isBlank()) return@PrimaryAction
+            onSave(SiteVisit(clientName = client.trim(), projectName = project.trim(), technicianName = tech.trim(), date = date.trim(), jobType = jobType.trim().ifBlank { "General Service Call" }))
+        }
+    }
+}
 
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Button(
-                    onClick = { },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    )
-                ) {
-                    Text(text = "New Site Visit", fontWeight = FontWeight.Bold)
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    HomeSecondaryButton(
-                        text = "Recent",
-                        modifier = Modifier.weight(1f)
-                    )
-                    HomeSecondaryButton(
-                        text = "Settings",
-                        modifier = Modifier.weight(1f)
-                    )
+@Composable
+fun RecentVisitsScreen(visits: List<SiteVisit>, onOpen: (SiteVisit) -> Unit, onDelete: (SiteVisit) -> Unit, onNewVisit: () -> Unit) {
+    if (visits.isEmpty()) {
+        EmptyState("No visits yet", "Create your first site visit and Galvyx will keep it locally on this device.")
+        Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.BottomCenter) { PrimaryAction("New Site Visit", onClick = onNewVisit) }
+        return
+    }
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(visits, key = { it.id }) { visit ->
+            CardPanel {
+                Text(visit.title, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                Text("${visit.date} • ${visit.jobType}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(visit.summary(), color = GalvyxCyan, fontWeight = FontWeight.SemiBold)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { onOpen(visit) }, modifier = Modifier.weight(1f)) { Text("Open") }
+                    OutlinedButton(onClick = { onDelete(visit) }, modifier = Modifier.weight(1f)) { Text("Delete") }
                 }
             }
         }
@@ -162,27 +331,372 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun HomeSecondaryButton(
-    text: String,
-    modifier: Modifier = Modifier
-) {
-    OutlinedButton(
-        onClick = { },
-        modifier = modifier.height(48.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = OutlinedButtonDefaults.outlinedButtonColors(
-            contentColor = MaterialTheme.colorScheme.secondary
-        ),
+fun VisitDetailScreen(visit: SiteVisit, onAddNote: () -> Unit, onAddDevice: () -> Unit, onAddExpense: () -> Unit, onAddPhoto: () -> Unit, onExport: () -> Unit) {
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            CardPanel {
+                Text(visit.title, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                Text("${visit.date} • ${visit.technicianName.ifBlank { "Technician not set" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(visit.jobType, color = GalvyxCyan, fontWeight = FontWeight.SemiBold)
+                Text(visit.summary(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                HorizontalDivider(color = DividerDefaults.color.copy(alpha = 0.25f))
+                TwoColumnActions(
+                    "Add Note" to onAddNote,
+                    "Add Photo" to onAddPhoto,
+                    "Add Device" to onAddDevice,
+                    "Add Expense" to onAddExpense
+                )
+                PrimaryAction("Export / Share PDF Report", onClick = onExport)
+            }
+        }
+        item { SectionHeader("Notes", visit.notes.size) }
+        if (visit.notes.isEmpty()) item { SmallEmpty("No notes yet") }
+        items(visit.notes, key = { it.id }) { note -> DetailCard(note.title.ifBlank { note.category }, "${note.location} • ${note.category}", note.notes) }
+        item { SectionHeader("Devices", visit.devices.size) }
+        if (visit.devices.isEmpty()) item { SmallEmpty("No devices yet") }
+        items(visit.devices, key = { it.id }) { device -> DetailCard(device.hostname.ifBlank { device.deviceType }, "${device.location} • ${device.manufacturer} ${device.model}", listOf(device.ipAddress, device.macAddress, device.serialNumber, device.notes).filter { it.isNotBlank() }.joinToString("\n")) }
+        item { SectionHeader("Expenses", visit.expenses.size) }
+        if (visit.expenses.isEmpty()) item { SmallEmpty("No expenses yet") }
+        items(visit.expenses, key = { it.id }) { expense -> DetailCard("${expense.vendor} ${expense.amount}".trim(), "${expense.date} • ${expense.category} • ${expense.paymentMethod}", expense.notes) }
+        item { SectionHeader("Photos", visit.photos.size) }
+        if (visit.photos.isEmpty()) item { SmallEmpty("No photos yet") }
+        items(visit.photos, key = { it.id }) { photo -> DetailCard(photo.caption.ifBlank { "Photo" }, "Saved locally", photo.path) }
+    }
+}
+
+@Composable
+fun SettingsScreen(profile: CompanyProfile, onSave: (CompanyProfile) -> Unit) {
+    var company by rememberSaveable(profile.companyName) { mutableStateOf(profile.companyName) }
+    var tech by rememberSaveable(profile.technicianName) { mutableStateOf(profile.technicianName) }
+    var footer by rememberSaveable(profile.reportFooter) { mutableStateOf(profile.reportFooter) }
+    FormColumn {
+        Text("Company Profile", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text("This keeps Galvyx generic. Kortech can be one profile later; no login or cloud sync in v1.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FormTextField("Company Name", company) { company = it }
+        FormTextField("Default Technician Name", tech) { tech = it }
+        FormTextField("Report Footer", footer) { footer = it }
+        PrimaryAction("Save Settings") { onSave(CompanyProfile(company.trim(), tech.trim(), footer.trim().ifBlank { "Generated by Galvyx" })) }
+    }
+}
+
+@Composable
+fun NoteDialog(onDismiss: () -> Unit, onSave: (VisitNote) -> Unit) {
+    var location by rememberSaveable { mutableStateOf("") }
+    var category by rememberSaveable { mutableStateOf("General Note") }
+    var title by rememberSaveable { mutableStateOf("") }
+    var notes by rememberSaveable { mutableStateOf("") }
+    FormDialog("Add Note", onDismiss, onSave = { onSave(VisitNote(location = location.trim(), category = category.trim(), title = title.trim(), notes = notes.trim())) }) {
+        FormTextField("Location", location) { location = it }
+        FormTextField("Category", category) { category = it }
+        HintText("Examples: Network Port, Switch / Firewall, Camera, Workstation, Cable / Low Voltage, Issue Found, Follow-Up Needed")
+        FormTextField("Title", title) { title = it }
+        FormTextField("Notes", notes, minLines = 4) { notes = it }
+    }
+}
+
+@Composable
+fun DeviceDialog(onDismiss: () -> Unit, onSave: (DeviceInfo) -> Unit) {
+    var location by rememberSaveable { mutableStateOf("") }
+    var type by rememberSaveable { mutableStateOf("Other") }
+    var manufacturer by rememberSaveable { mutableStateOf("") }
+    var model by rememberSaveable { mutableStateOf("") }
+    var serial by rememberSaveable { mutableStateOf("") }
+    var mac by rememberSaveable { mutableStateOf("") }
+    var ip by rememberSaveable { mutableStateOf("") }
+    var hostname by rememberSaveable { mutableStateOf("") }
+    var notes by rememberSaveable { mutableStateOf("") }
+    FormDialog("Add Device", onDismiss, onSave = { onSave(DeviceInfo(location = location.trim(), deviceType = type.trim(), manufacturer = manufacturer.trim(), model = model.trim(), serialNumber = serial.trim(), macAddress = mac.trim(), ipAddress = ip.trim(), hostname = hostname.trim(), notes = notes.trim())) }) {
+        FormTextField("Location", location) { location = it }
+        FormTextField("Device Type", type) { type = it }
+        FormTextField("Manufacturer", manufacturer) { manufacturer = it }
+        FormTextField("Model", model) { model = it }
+        FormTextField("Serial Number", serial) { serial = it }
+        FormTextField("MAC Address", mac) { mac = it }
+        FormTextField("IP Address", ip) { ip = it }
+        FormTextField("Hostname", hostname) { hostname = it }
+        FormTextField("Notes", notes, minLines = 3) { notes = it }
+    }
+}
+
+@Composable
+fun ExpenseDialog(onDismiss: () -> Unit, onSave: (VisitExpense) -> Unit) {
+    var date by rememberSaveable { mutableStateOf(todayString()) }
+    var category by rememberSaveable { mutableStateOf("Other") }
+    var vendor by rememberSaveable { mutableStateOf("") }
+    var amount by rememberSaveable { mutableStateOf("") }
+    var payment by rememberSaveable { mutableStateOf("Reimbursable") }
+    var notes by rememberSaveable { mutableStateOf("") }
+    FormDialog("Add Expense", onDismiss, onSave = { onSave(VisitExpense(date = date.trim(), category = category.trim(), vendor = vendor.trim(), amount = amount.trim(), paymentMethod = payment.trim(), notes = notes.trim())) }) {
+        FormTextField("Date", date) { date = it }
+        FormTextField("Category", category) { category = it }
+        FormTextField("Vendor / Merchant", vendor) { vendor = it }
+        FormTextField("Amount", amount, keyboardType = KeyboardType.Decimal) { amount = it }
+        FormTextField("Payment Method", payment) { payment = it }
+        FormTextField("Notes", notes, minLines = 3) { notes = it }
+    }
+}
+
+@Composable
+fun PhotoCaptionDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var caption by rememberSaveable { mutableStateOf("") }
+    FormDialog("Photo Saved", onDismiss, saveLabel = "Attach Photo", onSave = { onSave(caption.trim()) }) {
+        Text("Add a short caption so the report makes sense later.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FormTextField("Caption", caption) { caption = it }
+    }
+}
+
+@Composable
+fun FormDialog(title: String, onDismiss: () -> Unit, saveLabel: String = "Save", onSave: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp), content = content) },
+        confirmButton = { Button(onClick = onSave) { Text(saveLabel) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+fun CardPanel(content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
-        Text(text = text, fontWeight = FontWeight.SemiBold)
+        Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
+}
+
+@Composable
+fun FormColumn(content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+}
+
+@Composable
+fun FormTextField(label: String, value: String, minLines: Int = 1, keyboardType: KeyboardType = KeyboardType.Text, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(label) },
+        minLines = minLines,
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, keyboardType = keyboardType),
+        shape = RoundedCornerShape(16.dp)
+    )
+}
+
+@Composable
+fun PrimaryAction(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth().height(52.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary, contentColor = MaterialTheme.colorScheme.onPrimary)
+    ) { Text(text, fontWeight = FontWeight.Bold) }
+}
+
+@Composable
+fun HomeSecondaryButton(text: String, modifier: Modifier = Modifier, onClick: () -> Unit = {}) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.height(48.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.secondary),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+    ) { Text(text, fontWeight = FontWeight.SemiBold) }
+}
+
+@Composable
+fun TwoColumnActions(vararg actions: Pair<String, () -> Unit>) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        actions.toList().chunked(2).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                row.forEach { action -> OutlinedButton(onClick = action.second, modifier = Modifier.weight(1f)) { Text(action.first) } }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+fun SectionHeader(title: String, count: Int) {
+    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(title, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        Text(count.toString(), color = GalvyxCyan, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+fun DetailCard(title: String, subtitle: String, body: String) {
+    CardPanel {
+        Text(title.ifBlank { "Untitled" }, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+        if (subtitle.isNotBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+        if (body.isNotBlank()) Text(body, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
+fun SmallEmpty(text: String) {
+    Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp), color = GalvyxCardElevated) {
+        Text(text, modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+fun EmptyState(title: String, body: String) {
+    Column(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(title, fontWeight = FontWeight.Bold, fontSize = 24.sp, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(8.dp))
+        Text(body, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+    }
+}
+
+@Composable
+fun HintText(text: String) {
+    Text(text, fontSize = 12.sp, lineHeight = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+private fun todayString(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+private fun createPhotoUri(context: Context): Pair<String, Uri>? = runCatching {
+    val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Galvyx")
+    dir.mkdirs()
+    val file = File(dir, "galvyx_${System.currentTimeMillis()}.jpg")
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    file.absolutePath to uri
+}.getOrNull()
+
+private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyProfile): File? = runCatching {
+    val reportsDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Galvyx/Reports")
+    reportsDir.mkdirs()
+    val safeName = "Galvyx_${visit.clientName}_${visit.projectName}_${visit.date}".replace(Regex("[^A-Za-z0-9_-]+"), "_").trim('_').ifBlank { "Galvyx_Report" }
+    val file = File(reportsDir, "$safeName.pdf")
+
+    val document = PdfDocument()
+    val titlePaint = Paint().apply { textSize = 22f; isFakeBoldText = true }
+    val headerPaint = Paint().apply { textSize = 16f; isFakeBoldText = true }
+    val bodyPaint = Paint().apply { textSize = 11f }
+    var pageNumber = 1
+    var page = document.startPage(PdfDocument.PageInfo.Builder(612, 792, pageNumber).create())
+    var canvas = page.canvas
+    var y = 48f
+
+    fun newPage() {
+        document.finishPage(page)
+        pageNumber += 1
+        page = document.startPage(PdfDocument.PageInfo.Builder(612, 792, pageNumber).create())
+        canvas = page.canvas
+        y = 48f
+    }
+
+    fun line(text: String, paint: Paint = bodyPaint, gap: Float = 17f) {
+        if (y > 744f) newPage()
+        canvas.drawText(text.take(95), 42f, y, paint)
+        y += gap
+    }
+
+    fun wrapped(text: String) {
+        val words = text.replace('\n', ' ').split(' ')
+        var current = ""
+        for (word in words) {
+            val next = if (current.isBlank()) word else "$current $word"
+            if (next.length > 88) {
+                line(current)
+                current = word
+            } else current = next
+        }
+        if (current.isNotBlank()) line(current)
+    }
+
+    fun section(title: String) {
+        y += 8f
+        line(title, headerPaint, 22f)
+    }
+
+    line("Galvyx Site Visit Report", titlePaint, 28f)
+    line("${profile.companyName.ifBlank { "Company not set" }} • ${profile.reportFooter}")
+    section("Visit Summary")
+    line("Client/Site: ${visit.clientName}")
+    line("Project: ${visit.projectName}")
+    line("Technician: ${visit.technicianName}")
+    line("Date: ${visit.date}")
+    line("Job Type: ${visit.jobType}")
+    line(visit.summary())
+
+    section("Notes")
+    if (visit.notes.isEmpty()) line("No notes captured.")
+    visit.notes.forEachIndexed { index, note ->
+        line("${index + 1}. ${note.title.ifBlank { note.category }}", bodyPaint.apply { isFakeBoldText = true })
+        bodyPaint.isFakeBoldText = false
+        line("Location: ${note.location} • Category: ${note.category}")
+        wrapped(note.notes)
+        y += 5f
+    }
+
+    section("Devices")
+    if (visit.devices.isEmpty()) line("No devices captured.")
+    visit.devices.forEachIndexed { index, device ->
+        line("${index + 1}. ${device.deviceType} ${device.hostname}".trim(), bodyPaint.apply { isFakeBoldText = true })
+        bodyPaint.isFakeBoldText = false
+        listOf(
+            "Location: ${device.location}",
+            "Manufacturer/Model: ${device.manufacturer} ${device.model}",
+            "Serial: ${device.serialNumber}",
+            "MAC: ${device.macAddress}",
+            "IP: ${device.ipAddress}",
+            "Notes: ${device.notes}"
+        ).forEach { if (!it.endsWith(": ")) line(it) }
+        y += 5f
+    }
+
+    section("Expenses")
+    if (visit.expenses.isEmpty()) line("No expenses captured.")
+    visit.expenses.forEachIndexed { index, expense ->
+        line("${index + 1}. ${expense.vendor} ${expense.amount}".trim(), bodyPaint.apply { isFakeBoldText = true })
+        bodyPaint.isFakeBoldText = false
+        line("${expense.date} • ${expense.category} • ${expense.paymentMethod}")
+        wrapped(expense.notes)
+        y += 5f
+    }
+
+    section("Photos")
+    if (visit.photos.isEmpty()) line("No photos captured.")
+    visit.photos.forEachIndexed { index, photo ->
+        line("${index + 1}. ${photo.caption.ifBlank { "Photo" }}")
+        val bitmap = BitmapFactory.decodeFile(photo.path)
+        if (bitmap != null) {
+            if (y > 610f) newPage()
+            val maxWidth = 220f
+            val scale = maxWidth / bitmap.width
+            val width = maxWidth
+            val height = bitmap.height * scale
+            canvas.drawBitmap(bitmap, null, android.graphics.RectF(42f, y, 42f + width, y + height.coerceAtMost(150f)), null)
+            y += height.coerceAtMost(150f) + 12f
+        } else {
+            line(photo.path)
+        }
+    }
+
+    document.finishPage(page)
+    file.outputStream().use { document.writeTo(it) }
+    document.close()
+    file
+}.getOrNull()
+
+private fun sharePdf(context: Context, file: File) {
+    val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "application/pdf"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_SUBJECT, file.name)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(intent, "Share Galvyx report"))
 }
 
 @Preview(showBackground = true)
 @Composable
 fun HomeScreenPreview() {
-    GalvyxTheme {
-        HomeScreen()
-    }
+    GalvyxTheme { HomeScreen(visitCount = 3) }
 }
