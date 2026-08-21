@@ -1,24 +1,33 @@
 # Galvyx
 
-Galvyx is a local-first Android app for field technicians to capture site visit notes, photos, device details, expenses, and PDF reports.
+Galvyx is an Android field-reporting app for technicians who need to document site visits without slowing down the job.
 
-## Current v1 scope
+Use Galvyx to capture visit details, work notes, photos, device information, and expenses, then export a clean PDF report from the phone.
 
-- Create and manage site visits.
+## Features
+
+- Create and manage site visit records.
 - Capture notes, devices, expenses, and photos.
 - Edit visit headers, notes, devices, expenses, and photo captions.
-- Search and filter recent visits.
+- Search visits by client, project, technician, note text, device details, expense entries, and photo captions.
+- Filter recent visits by job type.
 - Confirm destructive deletes before removing records.
-- Store data locally on the device.
+- Store visit data locally on the device.
 - Generate and share PDF site visit reports.
-- Maintain a simple company profile for report branding.
+- Set company/report profile details for exported reports.
+
+## Privacy posture
+
+Galvyx is local-first. The app does not require an account, does not run a developer-operated backend, does not include advertising, and does not include analytics tracking. Reports are shared only when the user chooses a destination through Android's share sheet.
+
+See `docs/privacy-policy.md` for the public privacy-policy text.
 
 ## Build
 
 Open the project in Android Studio and let Gradle sync, or run:
 
 ```bash
-./gradlew testDebugUnitTest assembleDebug
+./gradlew testDebugUnitTest assembleDebug assembleRelease bundleRelease
 ```
 
 If building from a fresh CLI environment, set Android SDK location in `local.properties`:
@@ -27,7 +36,8 @@ If building from a fresh CLI environment, set Android SDK location in `local.pro
 sdk.dir=/path/to/Android/Sdk
 ```
 
-## Store readiness docs
+## Release materials
 
+- `docs/privacy-policy.md`
+- `docs/play-store-listing.md`
 - `docs/play-store-readiness.md`
-- `docs/privacy-policy-draft.md`

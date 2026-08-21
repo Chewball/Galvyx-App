@@ -498,7 +498,7 @@ fun SettingsScreen(profile: CompanyProfile, onSave: (CompanyProfile) -> Unit) {
     var footer by rememberSaveable(profile.reportFooter) { mutableStateOf(profile.reportFooter) }
     FormColumn {
         Text("Company Profile", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("This keeps Galvyx generic. Kortech can be one profile later; no login or cloud sync in v1.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Set the name and report footer that appear on exported site visit reports. Galvyx stores these settings on this device.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         FormTextField("Company Name", company) { company = it }
         FormTextField("Default Technician Name", tech) { tech = it }
         FormTextField("Report Footer", footer) { footer = it }
@@ -852,7 +852,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     }
 
     line("Galvyx Site Visit Report", titlePaint, 28f)
-    line("${profile.companyName.ifBlank { "Company not set" }} • ${profile.reportFooter}")
+    line("${profile.companyName.ifBlank { "Galvyx" }} • ${profile.reportFooter}")
     line("Generated: ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())}")
     section("Visit Summary")
     line("Client/Site: ${visit.clientName}")
