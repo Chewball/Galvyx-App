@@ -75,4 +75,25 @@ class GalvyxModelsTest {
         assertEquals(true, visit.matchesSearch("rack overview"))
         assertEquals(false, visit.matchesSearch("unknown-client"))
     }
+
+
+    @Test
+    fun companyProfileJsonRoundTripPreservesStorageSettings() {
+        val profile = CompanyProfile(
+            companyName = "Acme Field Services",
+            technicianName = "Omar",
+            reportFooter = "Prepared by Galvyx",
+            storageMode = StorageMode.SharePoint,
+            sharePointSiteUrl = "https://contoso.sharepoint.com/sites/FieldOps",
+            sharePointLibraryName = "Documents",
+            sharePointFolderPath = "Galvyx/Site Visits"
+        )
+
+        val restored = CompanyProfile.fromJson(profile.toJson())
+
+        assertEquals(StorageMode.SharePoint, restored.storageMode)
+        assertEquals("https://contoso.sharepoint.com/sites/FieldOps", restored.sharePointSiteUrl)
+        assertEquals("Documents", restored.sharePointLibraryName)
+        assertEquals("Galvyx/Site Visits", restored.sharePointFolderPath)
+    }
 }
