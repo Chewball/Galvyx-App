@@ -65,6 +65,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -958,14 +959,14 @@ fun CardPanel(content: @Composable ColumnScope.() -> Unit) {
 @Composable
 fun CapabilityStrip() {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        MiniCapability("📸", "Photos", GalvyxCyan, Modifier.weight(1f))
-        MiniCapability("🛰", "Assets", GalvyxVioletBright, Modifier.weight(1f))
-        MiniCapability("▣", "PDFs", GalvyxAlienGreen, Modifier.weight(1f))
+        MiniCapability("photo", "Photos", GalvyxCyan, Modifier.weight(1f))
+        MiniCapability("devices", "Devices", GalvyxVioletBright, Modifier.weight(1f))
+        MiniCapability("pdf", "PDFs", GalvyxAlienGreen, Modifier.weight(1f))
     }
 }
 
 @Composable
-fun MiniCapability(icon: String, label: String, accent: Color, modifier: Modifier = Modifier) {
+fun MiniCapability(kind: String, label: String, accent: Color, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(18.dp),
@@ -973,8 +974,61 @@ fun MiniCapability(icon: String, label: String, accent: Color, modifier: Modifie
         border = BorderStroke(1.dp, accent.copy(alpha = 0.35f))
     ) {
         Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(icon, fontSize = 18.sp)
+            CapabilityGlyph(kind = kind, accent = accent)
             Text(label, fontSize = 11.sp, color = accent, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun CapabilityGlyph(kind: String, accent: Color) {
+    Canvas(modifier = Modifier.size(24.dp)) {
+        val stroke = Stroke(width = 2.1f)
+        when (kind) {
+            "photo" -> {
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.95f),
+                    topLeft = Offset(size.width * 0.16f, size.height * 0.30f),
+                    size = Size(size.width * 0.68f, size.height * 0.48f),
+                    cornerRadius = CornerRadius(4f, 4f),
+                    style = stroke
+                )
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.75f),
+                    topLeft = Offset(size.width * 0.28f, size.height * 0.20f),
+                    size = Size(size.width * 0.22f, size.height * 0.14f),
+                    cornerRadius = CornerRadius(3f, 3f),
+                    style = stroke
+                )
+                drawCircle(color = accent.copy(alpha = 0.9f), radius = size.minDimension * 0.13f, center = center, style = stroke)
+                drawCircle(color = accent.copy(alpha = 0.32f), radius = size.minDimension * 0.05f, center = center)
+            }
+            "devices" -> {
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.95f),
+                    topLeft = Offset(size.width * 0.20f, size.height * 0.18f),
+                    size = Size(size.width * 0.60f, size.height * 0.40f),
+                    cornerRadius = CornerRadius(4f, 4f),
+                    style = stroke
+                )
+                drawLine(accent.copy(alpha = 0.78f), Offset(size.width * 0.50f, size.height * 0.58f), Offset(size.width * 0.50f, size.height * 0.78f), strokeWidth = 2.1f)
+                drawLine(accent.copy(alpha = 0.78f), Offset(size.width * 0.30f, size.height * 0.78f), Offset(size.width * 0.70f, size.height * 0.78f), strokeWidth = 2.1f)
+                listOf(0.25f to 0.78f, 0.50f to 0.82f, 0.75f to 0.78f).forEach { (x, y) ->
+                    drawCircle(color = accent.copy(alpha = 0.9f), radius = size.minDimension * 0.045f, center = Offset(size.width * x, size.height * y))
+                }
+            }
+            else -> {
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.95f),
+                    topLeft = Offset(size.width * 0.25f, size.height * 0.12f),
+                    size = Size(size.width * 0.50f, size.height * 0.72f),
+                    cornerRadius = CornerRadius(3f, 3f),
+                    style = stroke
+                )
+                drawLine(accent.copy(alpha = 0.75f), Offset(size.width * 0.38f, size.height * 0.36f), Offset(size.width * 0.62f, size.height * 0.36f), strokeWidth = 2f)
+                drawLine(accent.copy(alpha = 0.75f), Offset(size.width * 0.38f, size.height * 0.50f), Offset(size.width * 0.62f, size.height * 0.50f), strokeWidth = 2f)
+                drawLine(accent.copy(alpha = 0.75f), Offset(size.width * 0.38f, size.height * 0.64f), Offset(size.width * 0.56f, size.height * 0.64f), strokeWidth = 2f)
+            }
         }
     }
 }
