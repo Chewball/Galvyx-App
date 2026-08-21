@@ -84,6 +84,9 @@ class GalvyxModelsTest {
             technicianName = "Omar",
             reportFooter = "Prepared by Galvyx",
             storageMode = StorageMode.SharePoint,
+            localRootFolder = "Field Reports",
+            localReportsFolder = "PDF Exports",
+            localPhotosFolder = "Photo Attachments",
             sharePointSiteUrl = "https://contoso.sharepoint.com/sites/FieldOps",
             sharePointLibraryName = "Documents",
             sharePointFolderPath = "Galvyx/Site Visits"
@@ -92,6 +95,9 @@ class GalvyxModelsTest {
         val restored = CompanyProfile.fromJson(profile.toJson())
 
         assertEquals(StorageMode.SharePoint, restored.storageMode)
+        assertEquals("Field Reports", restored.localRootFolder)
+        assertEquals("PDF Exports", restored.localReportsFolder)
+        assertEquals("Photo Attachments", restored.localPhotosFolder)
         assertEquals("https://contoso.sharepoint.com/sites/FieldOps", restored.sharePointSiteUrl)
         assertEquals("Documents", restored.sharePointLibraryName)
         assertEquals("Galvyx/Site Visits", restored.sharePointFolderPath)
