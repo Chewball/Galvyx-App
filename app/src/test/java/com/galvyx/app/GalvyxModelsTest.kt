@@ -43,4 +43,11 @@ class GalvyxModelsTest {
         assertEquals("18.50", restored.first().expenses.first().amount)
         assertEquals("MDF rack", restored.first().photos.first().caption)
     }
+
+    @Test
+    fun moneyParserHandlesSymbolsCommasAndInvalidValues() {
+        assertEquals(1234.56, "$1,234.56".toMoneyOrZero(), 0.001)
+        assertEquals(18.5, "18.50".toMoneyOrZero(), 0.001)
+        assertEquals(0.0, "not a number".toMoneyOrZero(), 0.001)
+    }
 }

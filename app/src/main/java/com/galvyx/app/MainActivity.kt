@@ -15,6 +15,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -38,6 +40,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DividerDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +62,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -77,6 +83,12 @@ import java.util.Locale
 private const val PREFS_NAME = "galvyx_local_store"
 private const val PREF_VISITS = "visits"
 private const val PREF_PROFILE = "profile"
+
+private val JOB_TYPES = listOf("General Service Call", "Network Survey", "Camera / Security", "Access Point / Wi-Fi", "Workstation Replacement", "Server / Firewall", "Low Voltage / Cabling", "Inspection", "Other")
+private val NOTE_CATEGORIES = listOf("General Note", "Network Port", "Switch / Firewall", "Access Point / Wi-Fi", "Camera", "Workstation", "Server", "Cable / Low Voltage", "Power", "Expense / Receipt", "Issue Found", "Completed Work", "Follow-Up Needed")
+private val DEVICE_TYPES = listOf("Firewall", "Switch", "Access Point", "Camera", "NVR / DVR", "Server", "Workstation", "Printer", "Payment Terminal", "Time Clock", "UPS / Battery Backup", "Other")
+private val EXPENSE_CATEGORIES = listOf("Meal", "Gas", "Hotel", "Parking", "Tools / Supplies", "Equipment", "Mileage", "Toll", "Shipping", "Other")
+private val PAYMENT_METHODS = listOf("Personal Card", "Company Card", "Cash", "Reimbursable", "Other")
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -192,6 +204,13 @@ fun GalvyxApp(context: Context) {
                                 takePictureLauncher.launch(created.second)
                             }
                         },
+                        onDeleteNote = { note -> upsertVisit(visit.copy(notes = visit.notes.filterNot { it.id == note.id })) },
+                        onDeleteDevice = { device -> upsertVisit(visit.copy(devices = visit.devices.filterNot { it.id == device.id })) },
+                        onDeleteExpense = { expense -> upsertVisit(visit.copy(expenses = visit.expenses.filterNot { it.id == expense.id })) },
+                        onDeletePhoto = { photo ->
+                            deleteAppOwnedPhoto(context, photo.path)
+                            upsertVisit(visit.copy(photos = visit.photos.filterNot { it.id == photo.id }))
+                        },
                         onExport = {
                             val pdfFile = exportVisitPdf(context, visit, profile)
                             if (pdfFile != null) sharePdf(context, pdfFile) else Toast.makeText(context, "PDF export failed", Toast.LENGTH_LONG).show()
@@ -299,8 +318,7 @@ fun NewVisitScreen(defaultTechnician: String, onSave: (SiteVisit) -> Unit) {
         FormTextField("Project Name", project) { project = it }
         FormTextField("Technician Name", tech) { tech = it }
         FormTextField("Date", date) { date = it }
-        FormTextField("Job Type", jobType) { jobType = it }
-        HintText("Common job types: General Service Call, Network Survey, Camera / Security, Access Point / Wi-Fi, Workstation Replacement, Server / Firewall, Low Voltage / Cabling, Inspection, Other")
+        SimpleDropdown("Job Type", jobType, JOB_TYPES) { jobType = it }
         PrimaryAction("Save Site Visit") {
             if (client.isBlank() && project.isBlank()) return@PrimaryAction
             onSave(SiteVisit(clientName = client.trim(), projectName = project.trim(), technicianName = tech.trim(), date = date.trim(), jobType = jobType.trim().ifBlank { "General Service Call" }))
@@ -331,7 +349,19 @@ fun RecentVisitsScreen(visits: List<SiteVisit>, onOpen: (SiteVisit) -> Unit, onD
 }
 
 @Composable
-fun VisitDetailScreen(visit: SiteVisit, onAddNote: () -> Unit, onAddDevice: () -> Unit, onAddExpense: () -> Unit, onAddPhoto: () -> Unit, onExport: () -> Unit) {
+fun VisitDetailScreen(
+    visit: SiteVisit,
+    onAddNote: () -> Unit,
+    onAddDevice: () -> Unit,
+    onAddExpense: () -> Unit,
+    onAddPhoto: () -> Unit,
+    onDeleteNote: (VisitNote) -> Unit,
+    onDeleteDevice: (DeviceInfo) -> Unit,
+    onDeleteExpense: (VisitExpense) -> Unit,
+    onDeletePhoto: (VisitPhoto) -> Unit,
+    onExport: () -> Unit
+) {
+    val expenseTotal = visit.expenses.sumOf { it.amount.toMoneyOrZero() }
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             CardPanel {
@@ -339,6 +369,7 @@ fun VisitDetailScreen(visit: SiteVisit, onAddNote: () -> Unit, onAddDevice: () -
                 Text("${visit.date} • ${visit.technicianName.ifBlank { "Technician not set" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(visit.jobType, color = GalvyxCyan, fontWeight = FontWeight.SemiBold)
                 Text(visit.summary(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (visit.expenses.isNotEmpty()) Text("Expense total: \$${String.format(Locale.US, "%.2f", expenseTotal)}", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
                 HorizontalDivider(color = DividerDefaults.color.copy(alpha = 0.25f))
                 TwoColumnActions(
                     "Add Note" to onAddNote,
@@ -351,16 +382,24 @@ fun VisitDetailScreen(visit: SiteVisit, onAddNote: () -> Unit, onAddDevice: () -
         }
         item { SectionHeader("Notes", visit.notes.size) }
         if (visit.notes.isEmpty()) item { SmallEmpty("No notes yet") }
-        items(visit.notes, key = { it.id }) { note -> DetailCard(note.title.ifBlank { note.category }, "${note.location} • ${note.category}", note.notes) }
+        items(visit.notes, key = { it.id }) { note ->
+            DetailCard(note.title.ifBlank { note.category }, "${note.location} • ${note.category}", note.notes, onDelete = { onDeleteNote(note) })
+        }
         item { SectionHeader("Devices", visit.devices.size) }
         if (visit.devices.isEmpty()) item { SmallEmpty("No devices yet") }
-        items(visit.devices, key = { it.id }) { device -> DetailCard(device.hostname.ifBlank { device.deviceType }, "${device.location} • ${device.manufacturer} ${device.model}", listOf(device.ipAddress, device.macAddress, device.serialNumber, device.notes).filter { it.isNotBlank() }.joinToString("\n")) }
+        items(visit.devices, key = { it.id }) { device ->
+            DetailCard(device.hostname.ifBlank { device.deviceType }, "${device.location} • ${device.manufacturer} ${device.model}", listOf(device.ipAddress, device.macAddress, device.serialNumber, device.notes).filter { it.isNotBlank() }.joinToString("\n"), onDelete = { onDeleteDevice(device) })
+        }
         item { SectionHeader("Expenses", visit.expenses.size) }
         if (visit.expenses.isEmpty()) item { SmallEmpty("No expenses yet") }
-        items(visit.expenses, key = { it.id }) { expense -> DetailCard("${expense.vendor} ${expense.amount}".trim(), "${expense.date} • ${expense.category} • ${expense.paymentMethod}", expense.notes) }
+        items(visit.expenses, key = { it.id }) { expense ->
+            DetailCard("${expense.vendor} ${expense.amount}".trim(), "${expense.date} • ${expense.category} • ${expense.paymentMethod}", expense.notes, onDelete = { onDeleteExpense(expense) })
+        }
         item { SectionHeader("Photos", visit.photos.size) }
         if (visit.photos.isEmpty()) item { SmallEmpty("No photos yet") }
-        items(visit.photos, key = { it.id }) { photo -> DetailCard(photo.caption.ifBlank { "Photo" }, "Saved locally", photo.path) }
+        items(visit.photos, key = { it.id }) { photo ->
+            PhotoDetailCard(photo = photo, onDelete = { onDeletePhoto(photo) })
+        }
     }
 }
 
@@ -387,8 +426,7 @@ fun NoteDialog(onDismiss: () -> Unit, onSave: (VisitNote) -> Unit) {
     var notes by rememberSaveable { mutableStateOf("") }
     FormDialog("Add Note", onDismiss, onSave = { onSave(VisitNote(location = location.trim(), category = category.trim(), title = title.trim(), notes = notes.trim())) }) {
         FormTextField("Location", location) { location = it }
-        FormTextField("Category", category) { category = it }
-        HintText("Examples: Network Port, Switch / Firewall, Camera, Workstation, Cable / Low Voltage, Issue Found, Follow-Up Needed")
+        SimpleDropdown("Category", category, NOTE_CATEGORIES) { category = it }
         FormTextField("Title", title) { title = it }
         FormTextField("Notes", notes, minLines = 4) { notes = it }
     }
@@ -407,7 +445,7 @@ fun DeviceDialog(onDismiss: () -> Unit, onSave: (DeviceInfo) -> Unit) {
     var notes by rememberSaveable { mutableStateOf("") }
     FormDialog("Add Device", onDismiss, onSave = { onSave(DeviceInfo(location = location.trim(), deviceType = type.trim(), manufacturer = manufacturer.trim(), model = model.trim(), serialNumber = serial.trim(), macAddress = mac.trim(), ipAddress = ip.trim(), hostname = hostname.trim(), notes = notes.trim())) }) {
         FormTextField("Location", location) { location = it }
-        FormTextField("Device Type", type) { type = it }
+        SimpleDropdown("Device Type", type, DEVICE_TYPES) { type = it }
         FormTextField("Manufacturer", manufacturer) { manufacturer = it }
         FormTextField("Model", model) { model = it }
         FormTextField("Serial Number", serial) { serial = it }
@@ -428,10 +466,10 @@ fun ExpenseDialog(onDismiss: () -> Unit, onSave: (VisitExpense) -> Unit) {
     var notes by rememberSaveable { mutableStateOf("") }
     FormDialog("Add Expense", onDismiss, onSave = { onSave(VisitExpense(date = date.trim(), category = category.trim(), vendor = vendor.trim(), amount = amount.trim(), paymentMethod = payment.trim(), notes = notes.trim())) }) {
         FormTextField("Date", date) { date = it }
-        FormTextField("Category", category) { category = it }
+        SimpleDropdown("Category", category, EXPENSE_CATEGORIES) { category = it }
         FormTextField("Vendor / Merchant", vendor) { vendor = it }
         FormTextField("Amount", amount, keyboardType = KeyboardType.Decimal) { amount = it }
-        FormTextField("Payment Method", payment) { payment = it }
+        SimpleDropdown("Payment Method", payment, PAYMENT_METHODS) { payment = it }
         FormTextField("Notes", notes, minLines = 3) { notes = it }
     }
 }
@@ -487,6 +525,35 @@ fun FormTextField(label: String, value: String, minLines: Int = 1, keyboardType:
 }
 
 @Composable
+fun SimpleDropdown(label: String, selected: String, options: List<String>, onSelected: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("$label: $selected", textAlign = TextAlign.Start)
+                Text("⌄", color = GalvyxCyan, fontWeight = FontWeight.Bold)
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        onSelected(option)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun PrimaryAction(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Button(
         onClick = onClick,
@@ -528,11 +595,42 @@ fun SectionHeader(title: String, count: Int) {
 }
 
 @Composable
-fun DetailCard(title: String, subtitle: String, body: String) {
+fun DetailCard(title: String, subtitle: String, body: String, onDelete: (() -> Unit)? = null) {
     CardPanel {
-        Text(title.ifBlank { "Untitled" }, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-        if (subtitle.isNotBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title.ifBlank { "Untitled" }, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                if (subtitle.isNotBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            }
+            if (onDelete != null) {
+                TextButton(onClick = onDelete) { Text("Delete") }
+            }
+        }
         if (body.isNotBlank()) Text(body, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
+fun PhotoDetailCard(photo: VisitPhoto, onDelete: () -> Unit) {
+    CardPanel {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(photo.caption.ifBlank { "Photo" }, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                Text("Saved locally", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            }
+            TextButton(onClick = onDelete) { Text("Delete") }
+        }
+        val bitmap = remember(photo.path) { BitmapFactory.decodeFile(photo.path) }
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = photo.caption.ifBlank { "Site visit photo" },
+                modifier = Modifier.fillMaxWidth().height(180.dp),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Text(photo.path, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -558,6 +656,14 @@ fun HintText(text: String) {
 }
 
 private fun todayString(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+fun String.toMoneyOrZero(): Double = replace("$", "").replace(",", "").trim().toDoubleOrNull() ?: 0.0
+
+private fun deleteAppOwnedPhoto(context: Context, photoPath: String): Boolean = runCatching {
+    val photosRoot = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Galvyx").canonicalFile
+    val target = File(photoPath).canonicalFile
+    target.path.startsWith(photosRoot.path) && target.delete()
+}.getOrDefault(false)
 
 private fun createPhotoUri(context: Context): Pair<String, Uri>? = runCatching {
     val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Galvyx")
