@@ -7,8 +7,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val DarkColorScheme = darkColorScheme(
-    primary = GalvyxVioletBright,
-    onPrimary = GalvyxSpaceBlack,
+    primary = GalvyxViolet,
+    onPrimary = GalvyxTextPrimary,
     primaryContainer = GalvyxViolet,
     onPrimaryContainer = GalvyxTextPrimary,
     secondary = GalvyxCyan,
