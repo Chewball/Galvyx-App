@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Screen { Home, NewVisit, Recent, VisitDetail, Settings }
-private enum class DialogKind { None, Note, Device, Expense, PhotoCaption, EditVisit, EditNote, EditDevice, EditExpense }
+private enum class DialogKind { None, Note, Device, Expense, PhotoCaption, EditVisit, EditNote, EditDevice, EditExpense, EditPhoto }
 private enum class DeleteKind { Visit, Note, Device, Expense, Photo }
 private data class DeleteRequest(val kind: DeleteKind, val id: String, val title: String)
 
@@ -212,6 +212,7 @@ fun GalvyxApp(context: Context) {
                         onEditNote = { note -> editingItemId = note.id; dialog = DialogKind.EditNote },
                         onEditDevice = { device -> editingItemId = device.id; dialog = DialogKind.EditDevice },
                         onEditExpense = { expense -> editingItemId = expense.id; dialog = DialogKind.EditExpense },
+                        onEditPhoto = { photo -> editingItemId = photo.id; dialog = DialogKind.EditPhoto },
                         onDeleteNote = { note -> deleteRequest = DeleteRequest(DeleteKind.Note, note.id, note.title.ifBlank { note.category }) },
                         onDeleteDevice = { device -> deleteRequest = DeleteRequest(DeleteKind.Device, device.id, device.hostname.ifBlank { device.deviceType }) },
                         onDeleteExpense = { expense -> deleteRequest = DeleteRequest(DeleteKind.Expense, expense.id, expense.vendor.ifBlank { expense.category }) },
@@ -268,11 +269,18 @@ fun GalvyxApp(context: Context) {
                     onSave = { expense -> upsertVisit(visit.copy(expenses = visit.expenses.map { if (it.id == expense.id) expense else it })); editingItemId = null; dialog = DialogKind.None }
                 )
             }
+            DialogKind.EditPhoto -> visit.photos.firstOrNull { it.id == editingItemId }?.let { existing ->
+                PhotoCaptionDialog(
+                    existing = existing,
+                    onDismiss = { editingItemId = null; dialog = DialogKind.None },
+                    onSave = { photo -> upsertVisit(visit.copy(photos = visit.photos.map { if (it.id == photo.id) photo else it })); editingItemId = null; dialog = DialogKind.None }
+                )
+            }
             DialogKind.PhotoCaption -> PhotoCaptionDialog(
                 onDismiss = { pendingPhotoPath = null; pendingPhotoUri = null; dialog = DialogKind.None },
-                onSave = { caption ->
+                onSave = { photo ->
                     val path = pendingPhotoPath
-                    if (path != null) upsertVisit(visit.copy(photos = visit.photos + VisitPhoto(path = path, caption = caption)))
+                    if (path != null) upsertVisit(visit.copy(photos = visit.photos + photo.copy(path = path)))
                     pendingPhotoPath = null
                     pendingPhotoUri = null
                     dialog = DialogKind.None
@@ -384,13 +392,31 @@ fun NewVisitScreen(defaultTechnician: String, onSave: (SiteVisit) -> Unit) {
 
 @Composable
 fun RecentVisitsScreen(visits: List<SiteVisit>, onOpen: (SiteVisit) -> Unit, onDelete: (SiteVisit) -> Unit, onNewVisit: () -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var jobFilter by rememberSaveable { mutableStateOf("All Job Types") }
+    val jobOptions = listOf("All Job Types") + JOB_TYPES
+    val filteredVisits = visits.filter { visit ->
+        visit.matchesSearch(query) && (jobFilter == "All Job Types" || visit.jobType == jobFilter)
+    }
+
     if (visits.isEmpty()) {
         EmptyState("No visits yet", "Create your first site visit and Galvyx will keep it locally on this device.")
         Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.BottomCenter) { PrimaryAction("New Site Visit", onClick = onNewVisit) }
         return
     }
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        items(visits, key = { it.id }) { visit ->
+        item {
+            CardPanel {
+                Text("Find a visit", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                FormTextField("Search client, project, tech, notes, devices, expenses", query) { query = it }
+                SimpleDropdown("Job Filter", jobFilter, jobOptions) { jobFilter = it }
+                Text("${filteredVisits.size} of ${visits.size} visits", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            }
+        }
+        if (filteredVisits.isEmpty()) {
+            item { SmallEmpty("No visits match your search or filter") }
+        }
+        items(filteredVisits, key = { it.id }) { visit ->
             CardPanel {
                 Text(visit.title, fontWeight = FontWeight.Bold, fontSize = 20.sp)
                 Text("${visit.date} • ${visit.jobType}", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -415,6 +441,7 @@ fun VisitDetailScreen(
     onEditNote: (VisitNote) -> Unit,
     onEditDevice: (DeviceInfo) -> Unit,
     onEditExpense: (VisitExpense) -> Unit,
+    onEditPhoto: (VisitPhoto) -> Unit,
     onDeleteNote: (VisitNote) -> Unit,
     onDeleteDevice: (DeviceInfo) -> Unit,
     onDeleteExpense: (VisitExpense) -> Unit,
@@ -459,7 +486,7 @@ fun VisitDetailScreen(
         item { SectionHeader("Photos", visit.photos.size) }
         if (visit.photos.isEmpty()) item { SmallEmpty("No photos yet") }
         items(visit.photos, key = { it.id }) { photo ->
-            PhotoDetailCard(photo = photo, onDelete = { onDeletePhoto(photo) })
+            PhotoDetailCard(photo = photo, onEdit = { onEditPhoto(photo) }, onDelete = { onDeletePhoto(photo) })
         }
     }
 }
@@ -566,9 +593,9 @@ fun ExpenseDialog(existing: VisitExpense? = null, onDismiss: () -> Unit, onSave:
 }
 
 @Composable
-fun PhotoCaptionDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
-    var caption by rememberSaveable { mutableStateOf("") }
-    FormDialog("Photo Saved", onDismiss, saveLabel = "Attach Photo", onSave = { onSave(caption.trim()) }) {
+fun PhotoCaptionDialog(existing: VisitPhoto? = null, onDismiss: () -> Unit, onSave: (VisitPhoto) -> Unit) {
+    var caption by rememberSaveable(existing?.id) { mutableStateOf(existing?.caption.orEmpty()) }
+    FormDialog(if (existing == null) "Photo Saved" else "Edit Photo Caption", onDismiss, saveLabel = if (existing == null) "Attach Photo" else "Save Caption", onSave = { onSave((existing ?: VisitPhoto(path = "")).copy(caption = caption.trim())) }) {
         Text("Add a short caption so the report makes sense later.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         FormTextField("Caption", caption) { caption = it }
     }
@@ -703,14 +730,17 @@ fun DetailCard(title: String, subtitle: String, body: String, onEdit: (() -> Uni
 }
 
 @Composable
-fun PhotoDetailCard(photo: VisitPhoto, onDelete: () -> Unit) {
+fun PhotoDetailCard(photo: VisitPhoto, onEdit: () -> Unit, onDelete: () -> Unit) {
     CardPanel {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(photo.caption.ifBlank { "Photo" }, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                 Text("Saved locally", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
             }
-            TextButton(onClick = onDelete) { Text("Delete") }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onEdit) { Text("Edit") }
+                TextButton(onClick = onDelete) { Text("Delete") }
+            }
         }
         val bitmap = remember(photo.path) { BitmapFactory.decodeFile(photo.path) }
         if (bitmap != null) {
@@ -777,12 +807,19 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     val titlePaint = Paint().apply { textSize = 22f; isFakeBoldText = true }
     val headerPaint = Paint().apply { textSize = 16f; isFakeBoldText = true }
     val bodyPaint = Paint().apply { textSize = 11f }
+    val footerPaint = Paint().apply { textSize = 9f }
     var pageNumber = 1
     var page = document.startPage(PdfDocument.PageInfo.Builder(612, 792, pageNumber).create())
     var canvas = page.canvas
     var y = 48f
 
+    fun footer() {
+        canvas.drawText("Galvyx • ${visit.title.take(52)}", 42f, 770f, footerPaint)
+        canvas.drawText("Page $pageNumber", 540f, 770f, footerPaint)
+    }
+
     fun newPage() {
+        footer()
         document.finishPage(page)
         pageNumber += 1
         page = document.startPage(PdfDocument.PageInfo.Builder(612, 792, pageNumber).create())
@@ -791,7 +828,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     }
 
     fun line(text: String, paint: Paint = bodyPaint, gap: Float = 17f) {
-        if (y > 744f) newPage()
+        if (y > 724f) newPage()
         canvas.drawText(text.take(95), 42f, y, paint)
         y += gap
     }
@@ -880,6 +917,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
         }
     }
 
+    footer()
     document.finishPage(page)
     file.outputStream().use { document.writeTo(it) }
     document.close()

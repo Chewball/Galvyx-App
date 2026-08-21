@@ -6,7 +6,8 @@ Galvyx is a local-first Android app for field technicians to capture site visit 
 
 - Create and manage site visits.
 - Capture notes, devices, expenses, and photos.
-- Edit visit headers, notes, devices, and expenses.
+- Edit visit headers, notes, devices, expenses, and photo captions.
+- Search and filter recent visits.
 - Confirm destructive deletes before removing records.
 - Store data locally on the device.
 - Generate and share PDF site visit reports.

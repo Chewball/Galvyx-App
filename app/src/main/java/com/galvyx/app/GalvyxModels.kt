@@ -155,6 +155,22 @@ data class SiteVisit(
 
     fun summary(): String = "${notes.size} notes • ${devices.size} devices • ${expenses.size} expenses • ${photos.size} photos"
 
+    fun matchesSearch(query: String): Boolean {
+        val normalized = query.trim().lowercase()
+        if (normalized.isBlank()) return true
+        return listOf(
+            clientName,
+            projectName,
+            technicianName,
+            date,
+            jobType,
+            notes.joinToString(" ") { listOf(it.location, it.category, it.title, it.notes).joinToString(" ") },
+            devices.joinToString(" ") { listOf(it.location, it.deviceType, it.manufacturer, it.model, it.serialNumber, it.macAddress, it.ipAddress, it.hostname, it.notes).joinToString(" ") },
+            expenses.joinToString(" ") { listOf(it.date, it.category, it.vendor, it.amount, it.paymentMethod, it.notes).joinToString(" ") },
+            photos.joinToString(" ") { it.caption }
+        ).joinToString(" ").lowercase().contains(normalized)
+    }
+
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
         .put("clientName", clientName)

@@ -41,14 +41,16 @@ Use this as a draft, not legal advice:
 
 ## Manual smoke test before internal testing
 
-- Create a new visit.
-- Edit visit header fields.
-- Add, edit, and delete a note.
-- Add, edit, and delete a device.
-- Add, edit, and delete an expense.
-- Add and delete a photo.
-- Export/share a PDF.
-- Close/reopen the app and confirm records persist.
-- Confirm no visit/photo disappears after app restart.
-- Test with light/dark system theme.
-- Test with larger Android font size.
+- [ ] Create a new visit.
+- [ ] Edit visit header fields.
+- [ ] Add, edit, and delete a note.
+- [ ] Add, edit, and delete a device.
+- [ ] Add, edit, and delete an expense.
+- [ ] Add, edit, and delete a photo caption.
+- [ ] Search visits by client, project, device, note, expense, and photo-caption text.
+- [ ] Filter recent visits by job type.
+- [ ] Export/share a PDF and confirm page footers/page numbers appear on longer reports.
+- [ ] Close/reopen the app and confirm records persist.
+- [ ] Confirm no visit/photo disappears after app restart.
+- [ ] Test with light/dark system theme.
+- [ ] Test with larger Android font size.

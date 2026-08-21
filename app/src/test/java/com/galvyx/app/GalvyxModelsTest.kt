@@ -56,4 +56,23 @@ class GalvyxModelsTest {
         assertEquals("$18.50", 18.5.toCurrencyString())
         assertEquals("$0.00", 0.0.toCurrencyString())
     }
+
+    @Test
+    fun visitSearchMatchesNestedFieldData() {
+        val visit = SiteVisit(
+            clientName = "Reset",
+            projectName = "Tahoe Refresh",
+            technicianName = "Omar",
+            jobType = "Network Survey",
+            notes = listOf(VisitNote(location = "MDF", title = "Firewall", notes = "FCC listener checked")),
+            devices = listOf(DeviceInfo(hostname = "sw-core", ipAddress = "10.0.31.31")),
+            expenses = listOf(VisitExpense(vendor = "Fuel Stop", amount = "\$42.10")),
+            photos = listOf(VisitPhoto(path = "/tmp/photo.jpg", caption = "Rack overview"))
+        )
+
+        assertEquals(true, visit.matchesSearch("tahoe"))
+        assertEquals(true, visit.matchesSearch("10.0.31.31"))
+        assertEquals(true, visit.matchesSearch("rack overview"))
+        assertEquals(false, visit.matchesSearch("unknown-client"))
+    }
 }
