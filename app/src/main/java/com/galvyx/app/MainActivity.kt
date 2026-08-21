@@ -68,6 +68,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -82,9 +83,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
+import com.galvyx.app.ui.theme.GalvyxAlienGreen
 import com.galvyx.app.ui.theme.GalvyxCardElevated
 import com.galvyx.app.ui.theme.GalvyxCyan
 import com.galvyx.app.ui.theme.GalvyxTheme
+import com.galvyx.app.ui.theme.GalvyxVioletBright
 import java.io.File
 import java.io.OutputStream
 import java.text.SimpleDateFormat
@@ -461,6 +464,8 @@ fun HomeScreen(
                     }
                 }
 
+                CapabilityStrip()
+
                 Text(
                     text = "Capture notes, photos, device details, expenses, and follow-up items from the field.",
                     fontSize = 14.sp,
@@ -657,8 +662,20 @@ fun RecentVisitsScreen(visits: List<SiteVisit>, onOpen: (SiteVisit) -> Unit, onD
         }
         items(filteredVisits, key = { it.id }) { visit ->
             CardPanel {
-                Text(visit.title, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                Text("${visit.date} • ${visit.jobType}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(visit.title, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                        Text("${visit.date} • ${visit.technicianName.ifBlank { "Technician TBD" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    NeonPill(visit.jobType.take(18), GalvyxCyan)
+                }
+                VisitMetricRow(
+                    notes = visit.notes.size,
+                    photos = visit.photos.size,
+                    devices = visit.devices.size,
+                    expenses = visit.expenses.size,
+                    compact = true
+                )
                 Text(visit.summary(), color = GalvyxCyan, fontWeight = FontWeight.SemiBold)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(onClick = { onOpen(visit) }, modifier = Modifier.weight(1f)) { Text("Open") }
@@ -691,11 +708,21 @@ fun VisitDetailScreen(
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             CardPanel {
-                Text(visit.title, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text("${visit.date} • ${visit.technicianName.ifBlank { "Technician not set" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(visit.jobType, color = GalvyxCyan, fontWeight = FontWeight.SemiBold)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(visit.title, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Text("${visit.date} • ${visit.technicianName.ifBlank { "Technician not set" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    NeonPill(visit.jobType, GalvyxVioletBright)
+                }
                 Text(visit.summary(), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (visit.expenses.isNotEmpty()) Text("Expense total: ${expenseTotal.toCurrencyString()}", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
+                VisitMetricRow(
+                    notes = visit.notes.size,
+                    photos = visit.photos.size,
+                    devices = visit.devices.size,
+                    expenses = visit.expenses.size,
+                    expenseTotal = expenseTotal
+                )
                 HorizontalDivider(color = DividerDefaults.color.copy(alpha = 0.25f))
                 TwoColumnActions(
                     "Add Note" to onAddNote,
@@ -920,10 +947,90 @@ fun CardPanel(content: @Composable ColumnScope.() -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.82f))
     ) {
         Column(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+    }
+}
+
+@Composable
+fun CapabilityStrip() {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        MiniCapability("📸", "Photos", GalvyxCyan, Modifier.weight(1f))
+        MiniCapability("🛰", "Assets", GalvyxVioletBright, Modifier.weight(1f))
+        MiniCapability("▣", "PDFs", GalvyxAlienGreen, Modifier.weight(1f))
+    }
+}
+
+@Composable
+fun MiniCapability(icon: String, label: String, accent: Color, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        color = accent.copy(alpha = 0.10f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.35f))
+    ) {
+        Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(icon, fontSize = 18.sp)
+            Text(label, fontSize = 11.sp, color = accent, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun NeonPill(text: String, accent: Color) {
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = accent.copy(alpha = 0.12f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.42f))
+    ) {
+        Text(
+            text = text.ifBlank { "General" },
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = accent,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+fun VisitMetricRow(
+    notes: Int,
+    photos: Int,
+    devices: Int,
+    expenses: Int,
+    expenseTotal: Double? = null,
+    compact: Boolean = false
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetricTile("Notes", notes.toString(), GalvyxCyan, Modifier.weight(1f), compact)
+            MetricTile("Photos", photos.toString(), GalvyxVioletBright, Modifier.weight(1f), compact)
+            MetricTile("Devices", devices.toString(), GalvyxAlienGreen, Modifier.weight(1f), compact)
+            MetricTile("Expenses", expenses.toString(), MaterialTheme.colorScheme.primary, Modifier.weight(1f), compact)
+        }
+        if (expenseTotal != null && expenseTotal > 0.0) {
+            MetricTile("Expense Total", expenseTotal.toCurrencyString(), MaterialTheme.colorScheme.secondary, Modifier.fillMaxWidth(), compact = false)
+        }
+    }
+}
+
+@Composable
+fun MetricTile(label: String, value: String, accent: Color, modifier: Modifier = Modifier, compact: Boolean = false) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(18.dp),
+        color = GalvyxCardElevated.copy(alpha = 0.72f),
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.28f))
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = if (compact) 8.dp else 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(value, color = accent, fontWeight = FontWeight.ExtraBold, fontSize = if (compact) 15.sp else 18.sp, maxLines = 1)
+            Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = if (compact) 9.sp else 10.sp, maxLines = 1)
+        }
     }
 }
 
