@@ -354,6 +354,8 @@ fun HomeScreen(
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
+        ConstellationBackdrop(modifier = Modifier.fillMaxSize())
+
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.Center,
@@ -441,11 +443,11 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
-                PrimaryAction("+ New Site Visit", onClick = onNewVisit)
+                PrimaryAction("＋ New Site Visit", onClick = onNewVisit)
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    HomeSecondaryButton("Recent", Modifier.weight(1f), onRecent)
-                    HomeSecondaryButton("Settings", Modifier.weight(1f), onSettings)
+                    HomeSecondaryButton("◌ Recent", Modifier.weight(1f), onRecent)
+                    HomeSecondaryButton("⚙ Settings", Modifier.weight(1f), onSettings)
                 }
 
                 Text(
@@ -457,6 +459,52 @@ fun HomeScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+fun ConstellationBackdrop(modifier: Modifier = Modifier) {
+    val primary = MaterialTheme.colorScheme.primary
+    val secondary = MaterialTheme.colorScheme.secondary
+    val outline = MaterialTheme.colorScheme.outline
+
+    Canvas(modifier = modifier) {
+        val stars = listOf(
+            Offset(size.width * 0.12f, size.height * 0.16f),
+            Offset(size.width * 0.26f, size.height * 0.10f),
+            Offset(size.width * 0.45f, size.height * 0.18f),
+            Offset(size.width * 0.82f, size.height * 0.13f),
+            Offset(size.width * 0.76f, size.height * 0.31f),
+            Offset(size.width * 0.18f, size.height * 0.72f),
+            Offset(size.width * 0.34f, size.height * 0.82f),
+            Offset(size.width * 0.69f, size.height * 0.78f),
+            Offset(size.width * 0.88f, size.height * 0.68f)
+        )
+
+        val links = listOf(0 to 1, 1 to 2, 3 to 4, 5 to 6, 6 to 7, 7 to 8)
+        links.forEach { (start, end) ->
+            drawLine(
+                color = outline.copy(alpha = 0.18f),
+                start = stars[start],
+                end = stars[end],
+                strokeWidth = 1.2f
+            )
+        }
+
+        stars.forEachIndexed { index, point ->
+            val color = if (index % 3 == 0) secondary else primary
+            drawCircle(
+                color = color.copy(alpha = if (index % 2 == 0) 0.45f else 0.26f),
+                radius = if (index % 3 == 0) 3.2f else 2.0f,
+                center = point
+            )
+        }
+
+        drawCircle(
+            color = secondary.copy(alpha = 0.08f),
+            radius = size.minDimension * 0.36f,
+            center = Offset(size.width * 0.5f, size.height * 0.52f)
+        )
     }
 }
 
