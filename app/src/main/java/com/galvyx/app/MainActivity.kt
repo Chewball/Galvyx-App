@@ -371,7 +371,7 @@ fun HomeScreen(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
                 Text(
-                    text = "FIELD OPS • LOCAL FIRST",
+                    text = "FIELD OPS",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = GalvyxCyan,
@@ -451,7 +451,7 @@ fun HomeScreen(
                 }
 
                 Text(
-                    text = "Reports stay local until you export or share them.",
+                    text = "Export or share reports when the job is ready.",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
