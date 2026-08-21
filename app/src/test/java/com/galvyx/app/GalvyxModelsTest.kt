@@ -87,6 +87,8 @@ class GalvyxModelsTest {
             localRootFolder = "Field Reports",
             localReportsFolder = "PDF Exports",
             localPhotosFolder = "Photo Attachments",
+            localReportsTreeUri = "content://com.android.externalstorage.documents/tree/primary%3AReports",
+            localPhotosTreeUri = "content://com.android.externalstorage.documents/tree/primary%3APhotos",
             sharePointSiteUrl = "https://contoso.sharepoint.com/sites/FieldOps",
             sharePointLibraryName = "Documents",
             sharePointFolderPath = "Galvyx/Site Visits"
@@ -98,6 +100,8 @@ class GalvyxModelsTest {
         assertEquals("Field Reports", restored.localRootFolder)
         assertEquals("PDF Exports", restored.localReportsFolder)
         assertEquals("Photo Attachments", restored.localPhotosFolder)
+        assertEquals("content://com.android.externalstorage.documents/tree/primary%3AReports", restored.localReportsTreeUri)
+        assertEquals("content://com.android.externalstorage.documents/tree/primary%3APhotos", restored.localPhotosTreeUri)
         assertEquals("https://contoso.sharepoint.com/sites/FieldOps", restored.sharePointSiteUrl)
         assertEquals("Documents", restored.sharePointLibraryName)
         assertEquals("Galvyx/Site Visits", restored.sharePointFolderPath)

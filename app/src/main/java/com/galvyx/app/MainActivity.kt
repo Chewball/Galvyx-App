@@ -2,6 +2,7 @@ package com.galvyx.app
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
@@ -71,6 +72,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -79,10 +81,12 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import androidx.documentfile.provider.DocumentFile
 import com.galvyx.app.ui.theme.GalvyxCardElevated
 import com.galvyx.app.ui.theme.GalvyxCyan
 import com.galvyx.app.ui.theme.GalvyxTheme
 import java.io.File
+import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -113,6 +117,8 @@ private enum class Screen { Home, NewVisit, Recent, VisitDetail, Settings }
 private enum class DialogKind { None, Note, Device, Expense, PhotoCaption, EditVisit, EditNote, EditDevice, EditExpense, EditPhoto }
 private enum class DeleteKind { Visit, Note, Device, Expense, Photo }
 private data class DeleteRequest(val kind: DeleteKind, val id: String, val title: String)
+private data class ExportedReport(val uri: Uri, val displayName: String)
+private data class ReportTarget(val uri: Uri, val displayName: String, val outputStream: OutputStream)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -162,6 +168,20 @@ fun GalvyxApp(context: Context) {
         } else {
             pendingPhotoPath = null
             pendingPhotoUri = null
+        }
+    }
+    val reportsFolderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            persistProfile(profile.copy(localReportsTreeUri = uri.toString()))
+            Toast.makeText(context, "Reports folder selected", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val photosFolderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            persistProfile(profile.copy(localPhotosTreeUri = uri.toString()))
+            Toast.makeText(context, "Photos folder selected", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -225,12 +245,19 @@ fun GalvyxApp(context: Context) {
                         onDeleteExpense = { expense -> deleteRequest = DeleteRequest(DeleteKind.Expense, expense.id, expense.vendor.ifBlank { expense.category }) },
                         onDeletePhoto = { photo -> deleteRequest = DeleteRequest(DeleteKind.Photo, photo.id, photo.caption.ifBlank { "Photo" }) },
                         onExport = {
-                            val pdfFile = exportVisitPdf(context, visit, profile)
-                            if (pdfFile != null) sharePdf(context, pdfFile) else Toast.makeText(context, "PDF export failed", Toast.LENGTH_LONG).show()
+                            val report = exportVisitPdf(context, visit, profile)
+                            if (report != null) shareReport(context, report) else Toast.makeText(context, "PDF export failed", Toast.LENGTH_LONG).show()
                         }
                     )
                 } ?: EmptyState("Visit not found", "Go back and choose a recent site visit.")
-                Screen.Settings -> SettingsScreen(profile = profile, onSave = ::persistProfile)
+                Screen.Settings -> SettingsScreen(
+                    profile = profile,
+                    onSave = ::persistProfile,
+                    onChooseReportsFolder = { reportsFolderLauncher.launch(null) },
+                    onClearReportsFolder = { persistProfile(profile.copy(localReportsTreeUri = "")) },
+                    onChoosePhotosFolder = { photosFolderLauncher.launch(null) },
+                    onClearPhotosFolder = { persistProfile(profile.copy(localPhotosTreeUri = "")) }
+                )
             }
         }
     }
@@ -704,7 +731,14 @@ fun VisitDetailScreen(
 }
 
 @Composable
-fun SettingsScreen(profile: CompanyProfile, onSave: (CompanyProfile) -> Unit) {
+fun SettingsScreen(
+    profile: CompanyProfile,
+    onSave: (CompanyProfile) -> Unit,
+    onChooseReportsFolder: () -> Unit,
+    onClearReportsFolder: () -> Unit,
+    onChoosePhotosFolder: () -> Unit,
+    onClearPhotosFolder: () -> Unit
+) {
     var company by rememberSaveable(profile.companyName) { mutableStateOf(profile.companyName) }
     var tech by rememberSaveable(profile.technicianName) { mutableStateOf(profile.technicianName) }
     var footer by rememberSaveable(profile.reportFooter) { mutableStateOf(profile.reportFooter) }
@@ -732,7 +766,19 @@ fun SettingsScreen(profile: CompanyProfile, onSave: (CompanyProfile) -> Unit) {
             FormTextField("Main Folder", localRootFolder) { localRootFolder = it }
             FormTextField("Reports Folder", localReportsFolder) { localReportsFolder = it }
             FormTextField("Photos Folder", localPhotosFolder) { localPhotosFolder = it }
-            HintText("Files are saved under Galvyx app storage on this device. Report PDFs and photos will use these folder names.")
+            HintText("Default app storage path uses those folder names. To save to a specific folder on this phone, choose folders below.")
+            FolderPickerRow(
+                title = "PDF Report Folder",
+                uri = profile.localReportsTreeUri,
+                onChoose = onChooseReportsFolder,
+                onClear = onClearReportsFolder
+            )
+            FolderPickerRow(
+                title = "Photo Folder",
+                uri = profile.localPhotosTreeUri,
+                onChoose = onChoosePhotosFolder,
+                onClear = onClearPhotosFolder
+            )
         }
 
         if (StorageMode.fromLabel(storageMode) == StorageMode.SharePoint) {
@@ -752,6 +798,8 @@ fun SettingsScreen(profile: CompanyProfile, onSave: (CompanyProfile) -> Unit) {
                     localRootFolder = localRootFolder.trim().ifBlank { "Galvyx" },
                     localReportsFolder = localReportsFolder.trim().ifBlank { "Reports" },
                     localPhotosFolder = localPhotosFolder.trim().ifBlank { "Photos" },
+                    localReportsTreeUri = profile.localReportsTreeUri,
+                    localPhotosTreeUri = profile.localPhotosTreeUri,
                     sharePointSiteUrl = sharePointSiteUrl.trim(),
                     sharePointLibraryName = sharePointLibrary.trim().ifBlank { "Documents" },
                     sharePointFolderPath = sharePointFolder.trim().ifBlank { "Galvyx/Site Visits" }
@@ -927,6 +975,18 @@ fun SimpleDropdown(label: String, selected: String, options: List<String>, onSel
 }
 
 @Composable
+fun FolderPickerRow(title: String, uri: String, onChoose: () -> Unit, onClear: () -> Unit) {
+    CardPanel {
+        Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text(if (uri.isBlank()) "Using Galvyx app storage" else folderLabel(uri), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onChoose, modifier = Modifier.weight(1f)) { Text(if (uri.isBlank()) "Choose Folder" else "Change Folder") }
+            if (uri.isNotBlank()) OutlinedButton(onClick = onClear, modifier = Modifier.weight(1f)) { Text("Use Default") }
+        }
+    }
+}
+
+@Composable
 fun PrimaryAction(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Button(
         onClick = onClick,
@@ -997,7 +1057,8 @@ fun PhotoDetailCard(photo: VisitPhoto, onEdit: () -> Unit, onDelete: () -> Unit)
                 TextButton(onClick = onDelete) { Text("Delete") }
             }
         }
-        val bitmap = remember(photo.path) { BitmapFactory.decodeFile(photo.path) }
+        val context = LocalContext.current
+        val bitmap = remember(photo.path) { loadBitmap(context, photo.path) }
         if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
@@ -1052,6 +1113,9 @@ private fun safeFolderSegment(value: String): String = value
     .trim('_', ' ', '.', '-')
 
 private fun deleteAppOwnedPhoto(context: Context, photoPath: String, profile: CompanyProfile): Boolean = runCatching {
+    if (photoPath.startsWith("content://")) {
+        return@runCatching DocumentFile.fromSingleUri(context, Uri.parse(photoPath))?.delete() ?: false
+    }
     val target = File(photoPath).canonicalFile
     val currentPhotosRoot = appStorageDir(context, Environment.DIRECTORY_PICTURES, profile.localRootFolder, profile.localPhotosFolder).canonicalFile
     val legacyPhotosRoot = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Galvyx").canonicalFile
@@ -1060,6 +1124,11 @@ private fun deleteAppOwnedPhoto(context: Context, photoPath: String, profile: Co
 }.getOrDefault(false)
 
 private fun createPhotoUri(context: Context, profile: CompanyProfile): Pair<String, Uri>? = runCatching {
+    if (profile.localPhotosTreeUri.isNotBlank()) {
+        val tree = DocumentFile.fromTreeUri(context, Uri.parse(profile.localPhotosTreeUri)) ?: return@runCatching null
+        val file = tree.createFile("image/jpeg", "galvyx_${System.currentTimeMillis()}.jpg") ?: return@runCatching null
+        return@runCatching file.uri.toString() to file.uri
+    }
     val dir = appStorageDir(context, Environment.DIRECTORY_PICTURES, profile.localRootFolder, profile.localPhotosFolder)
     dir.mkdirs()
     val file = File(dir, "galvyx_${System.currentTimeMillis()}.jpg")
@@ -1067,11 +1136,9 @@ private fun createPhotoUri(context: Context, profile: CompanyProfile): Pair<Stri
     file.absolutePath to uri
 }.getOrNull()
 
-private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyProfile): File? = runCatching {
-    val reportsDir = appStorageDir(context, Environment.DIRECTORY_DOCUMENTS, profile.localRootFolder, profile.localReportsFolder)
-    reportsDir.mkdirs()
+private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyProfile): ExportedReport? = runCatching {
     val safeName = "Galvyx_${visit.clientName}_${visit.projectName}_${visit.date}_${System.currentTimeMillis()}".replace(Regex("[^A-Za-z0-9_-]+"), "_").trim('_').ifBlank { "Galvyx_Report" }
-    val file = File(reportsDir, "$safeName.pdf")
+    val target = createReportTarget(context, profile, "$safeName.pdf") ?: return@runCatching null
 
     val document = PdfDocument()
     val titlePaint = Paint().apply { textSize = 22f; isFakeBoldText = true }
@@ -1173,7 +1240,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     if (visit.photos.isEmpty()) line("No photos captured.")
     visit.photos.forEachIndexed { index, photo ->
         line("${index + 1}. ${photo.caption.ifBlank { "Photo" }}")
-        val bitmap = BitmapFactory.decodeFile(photo.path)
+        val bitmap = loadBitmap(context, photo.path)
         if (bitmap != null) {
             if (y > 610f) newPage()
             val maxWidth = 220f
@@ -1189,17 +1256,43 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
 
     footer()
     document.finishPage(page)
-    file.outputStream().use { document.writeTo(it) }
+    target.outputStream.use { document.writeTo(it) }
     document.close()
-    file
+    ExportedReport(target.uri, target.displayName)
 }.getOrNull()
 
-private fun sharePdf(context: Context, file: File) {
+private fun createReportTarget(context: Context, profile: CompanyProfile, displayName: String): ReportTarget? {
+    if (profile.localReportsTreeUri.isNotBlank()) {
+        val tree = DocumentFile.fromTreeUri(context, Uri.parse(profile.localReportsTreeUri)) ?: return null
+        val file = tree.createFile("application/pdf", displayName) ?: return null
+        val stream = context.contentResolver.openOutputStream(file.uri) ?: return null
+        return ReportTarget(file.uri, displayName, stream)
+    }
+    val reportsDir = appStorageDir(context, Environment.DIRECTORY_DOCUMENTS, profile.localRootFolder, profile.localReportsFolder)
+    reportsDir.mkdirs()
+    val file = File(reportsDir, displayName)
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+    return ReportTarget(uri, displayName, file.outputStream())
+}
+
+private fun loadBitmap(context: Context, reference: String): Bitmap? = runCatching {
+    if (reference.startsWith("content://")) {
+        context.contentResolver.openInputStream(Uri.parse(reference))?.use { BitmapFactory.decodeStream(it) }
+    } else {
+        BitmapFactory.decodeFile(reference)
+    }
+}.getOrNull()
+
+private fun folderLabel(uri: String): String = Uri.parse(uri).lastPathSegment
+    ?.substringAfterLast(':')
+    ?.ifBlank { null }
+    ?: "Selected folder"
+
+private fun shareReport(context: Context, report: ExportedReport) {
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "application/pdf"
-        putExtra(Intent.EXTRA_STREAM, uri)
-        putExtra(Intent.EXTRA_SUBJECT, file.name)
+        putExtra(Intent.EXTRA_STREAM, report.uri)
+        putExtra(Intent.EXTRA_SUBJECT, report.displayName)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(intent, "Share Galvyx report"))

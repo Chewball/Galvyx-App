@@ -22,6 +22,8 @@ data class CompanyProfile(
     val localRootFolder: String = "Galvyx",
     val localReportsFolder: String = "Reports",
     val localPhotosFolder: String = "Photos",
+    val localReportsTreeUri: String = "",
+    val localPhotosTreeUri: String = "",
     val sharePointSiteUrl: String = "",
     val sharePointLibraryName: String = "Documents",
     val sharePointFolderPath: String = "Galvyx/Site Visits"
@@ -34,6 +36,8 @@ data class CompanyProfile(
         .put("localRootFolder", localRootFolder)
         .put("localReportsFolder", localReportsFolder)
         .put("localPhotosFolder", localPhotosFolder)
+        .put("localReportsTreeUri", localReportsTreeUri)
+        .put("localPhotosTreeUri", localPhotosTreeUri)
         .put("sharePointSiteUrl", sharePointSiteUrl)
         .put("sharePointLibraryName", sharePointLibraryName)
         .put("sharePointFolderPath", sharePointFolderPath)
@@ -47,6 +51,8 @@ data class CompanyProfile(
             localRootFolder = json.optString("localRootFolder", "Galvyx"),
             localReportsFolder = json.optString("localReportsFolder", "Reports"),
             localPhotosFolder = json.optString("localPhotosFolder", "Photos"),
+            localReportsTreeUri = json.optString("localReportsTreeUri"),
+            localPhotosTreeUri = json.optString("localPhotosTreeUri"),
             sharePointSiteUrl = json.optString("sharePointSiteUrl"),
             sharePointLibraryName = json.optString("sharePointLibraryName", "Documents"),
             sharePointFolderPath = json.optString("sharePointFolderPath", "Galvyx/Site Visits")
