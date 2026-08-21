@@ -103,7 +103,9 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Screen { Home, NewVisit, Recent, VisitDetail, Settings }
-private enum class DialogKind { None, Note, Device, Expense, PhotoCaption }
+private enum class DialogKind { None, Note, Device, Expense, PhotoCaption, EditVisit, EditNote, EditDevice, EditExpense }
+private enum class DeleteKind { Visit, Note, Device, Expense, Photo }
+private data class DeleteRequest(val kind: DeleteKind, val id: String, val title: String)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -120,6 +122,8 @@ fun GalvyxApp(context: Context) {
     var screen by rememberSaveable { mutableStateOf(Screen.Home) }
     var selectedVisitId by rememberSaveable { mutableStateOf<String?>(null) }
     var dialog by rememberSaveable { mutableStateOf(DialogKind.None) }
+    var editingItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleteRequest by remember { mutableStateOf<DeleteRequest?>(null) }
     var pendingPhotoPath by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
 
@@ -185,7 +189,7 @@ fun GalvyxApp(context: Context) {
                 Screen.Recent -> RecentVisitsScreen(
                     visits = visits,
                     onOpen = ::openVisit,
-                    onDelete = { visit -> visits.removeAll { it.id == visit.id }; persistVisits() },
+                    onDelete = { visit -> deleteRequest = DeleteRequest(DeleteKind.Visit, visit.id, visit.title) },
                     onNewVisit = { screen = Screen.NewVisit }
                 )
                 Screen.VisitDetail -> selectedVisit()?.let { visit ->
@@ -194,6 +198,7 @@ fun GalvyxApp(context: Context) {
                         onAddNote = { dialog = DialogKind.Note },
                         onAddDevice = { dialog = DialogKind.Device },
                         onAddExpense = { dialog = DialogKind.Expense },
+                        onEditVisit = { dialog = DialogKind.EditVisit },
                         onAddPhoto = {
                             val created = createPhotoUri(context)
                             if (created == null) {
@@ -204,13 +209,13 @@ fun GalvyxApp(context: Context) {
                                 takePictureLauncher.launch(created.second)
                             }
                         },
-                        onDeleteNote = { note -> upsertVisit(visit.copy(notes = visit.notes.filterNot { it.id == note.id })) },
-                        onDeleteDevice = { device -> upsertVisit(visit.copy(devices = visit.devices.filterNot { it.id == device.id })) },
-                        onDeleteExpense = { expense -> upsertVisit(visit.copy(expenses = visit.expenses.filterNot { it.id == expense.id })) },
-                        onDeletePhoto = { photo ->
-                            deleteAppOwnedPhoto(context, photo.path)
-                            upsertVisit(visit.copy(photos = visit.photos.filterNot { it.id == photo.id }))
-                        },
+                        onEditNote = { note -> editingItemId = note.id; dialog = DialogKind.EditNote },
+                        onEditDevice = { device -> editingItemId = device.id; dialog = DialogKind.EditDevice },
+                        onEditExpense = { expense -> editingItemId = expense.id; dialog = DialogKind.EditExpense },
+                        onDeleteNote = { note -> deleteRequest = DeleteRequest(DeleteKind.Note, note.id, note.title.ifBlank { note.category }) },
+                        onDeleteDevice = { device -> deleteRequest = DeleteRequest(DeleteKind.Device, device.id, device.hostname.ifBlank { device.deviceType }) },
+                        onDeleteExpense = { expense -> deleteRequest = DeleteRequest(DeleteKind.Expense, expense.id, expense.vendor.ifBlank { expense.category }) },
+                        onDeletePhoto = { photo -> deleteRequest = DeleteRequest(DeleteKind.Photo, photo.id, photo.caption.ifBlank { "Photo" }) },
                         onExport = {
                             val pdfFile = exportVisitPdf(context, visit, profile)
                             if (pdfFile != null) sharePdf(context, pdfFile) else Toast.makeText(context, "PDF export failed", Toast.LENGTH_LONG).show()
@@ -229,14 +234,40 @@ fun GalvyxApp(context: Context) {
                 onDismiss = { dialog = DialogKind.None },
                 onSave = { note -> upsertVisit(visit.copy(notes = visit.notes + note)); dialog = DialogKind.None }
             )
+            DialogKind.EditVisit -> VisitDialog(
+                visit = visit,
+                onDismiss = { dialog = DialogKind.None },
+                onSave = { updated -> upsertVisit(updated); dialog = DialogKind.None }
+            )
+            DialogKind.EditNote -> visit.notes.firstOrNull { it.id == editingItemId }?.let { existing ->
+                NoteDialog(
+                    existing = existing,
+                    onDismiss = { editingItemId = null; dialog = DialogKind.None },
+                    onSave = { note -> upsertVisit(visit.copy(notes = visit.notes.map { if (it.id == note.id) note else it })); editingItemId = null; dialog = DialogKind.None }
+                )
+            }
             DialogKind.Device -> DeviceDialog(
                 onDismiss = { dialog = DialogKind.None },
                 onSave = { device -> upsertVisit(visit.copy(devices = visit.devices + device)); dialog = DialogKind.None }
             )
+            DialogKind.EditDevice -> visit.devices.firstOrNull { it.id == editingItemId }?.let { existing ->
+                DeviceDialog(
+                    existing = existing,
+                    onDismiss = { editingItemId = null; dialog = DialogKind.None },
+                    onSave = { device -> upsertVisit(visit.copy(devices = visit.devices.map { if (it.id == device.id) device else it })); editingItemId = null; dialog = DialogKind.None }
+                )
+            }
             DialogKind.Expense -> ExpenseDialog(
                 onDismiss = { dialog = DialogKind.None },
                 onSave = { expense -> upsertVisit(visit.copy(expenses = visit.expenses + expense)); dialog = DialogKind.None }
             )
+            DialogKind.EditExpense -> visit.expenses.firstOrNull { it.id == editingItemId }?.let { existing ->
+                ExpenseDialog(
+                    existing = existing,
+                    onDismiss = { editingItemId = null; dialog = DialogKind.None },
+                    onSave = { expense -> upsertVisit(visit.copy(expenses = visit.expenses.map { if (it.id == expense.id) expense else it })); editingItemId = null; dialog = DialogKind.None }
+                )
+            }
             DialogKind.PhotoCaption -> PhotoCaptionDialog(
                 onDismiss = { pendingPhotoPath = null; pendingPhotoUri = null; dialog = DialogKind.None },
                 onSave = { caption ->
@@ -249,6 +280,31 @@ fun GalvyxApp(context: Context) {
             )
             DialogKind.None -> Unit
         }
+    }
+
+    deleteRequest?.let { request ->
+        ConfirmDeleteDialog(
+            request = request,
+            onDismiss = { deleteRequest = null },
+            onConfirm = {
+                when (request.kind) {
+                    DeleteKind.Visit -> {
+                        visits.removeAll { it.id == request.id }
+                        if (selectedVisitId == request.id) { selectedVisitId = null; screen = Screen.Recent }
+                    }
+                    DeleteKind.Note -> selectedVisit()?.let { current -> upsertVisit(current.copy(notes = current.notes.filterNot { it.id == request.id })) }
+                    DeleteKind.Device -> selectedVisit()?.let { current -> upsertVisit(current.copy(devices = current.devices.filterNot { it.id == request.id })) }
+                    DeleteKind.Expense -> selectedVisit()?.let { current -> upsertVisit(current.copy(expenses = current.expenses.filterNot { it.id == request.id })) }
+                    DeleteKind.Photo -> selectedVisit()?.let { current ->
+                        current.photos.firstOrNull { it.id == request.id }?.let { deleteAppOwnedPhoto(context, it.path) }
+                        upsertVisit(current.copy(photos = current.photos.filterNot { it.id == request.id }))
+                    }
+                }
+                persistVisits()
+                deleteRequest = null
+                Toast.makeText(context, "Deleted ${request.kind.name.lowercase(Locale.US)}", Toast.LENGTH_SHORT).show()
+            }
+        )
     }
 }
 
@@ -355,6 +411,10 @@ fun VisitDetailScreen(
     onAddDevice: () -> Unit,
     onAddExpense: () -> Unit,
     onAddPhoto: () -> Unit,
+    onEditVisit: () -> Unit,
+    onEditNote: (VisitNote) -> Unit,
+    onEditDevice: (DeviceInfo) -> Unit,
+    onEditExpense: (VisitExpense) -> Unit,
     onDeleteNote: (VisitNote) -> Unit,
     onDeleteDevice: (DeviceInfo) -> Unit,
     onDeleteExpense: (VisitExpense) -> Unit,
@@ -369,13 +429,14 @@ fun VisitDetailScreen(
                 Text("${visit.date} • ${visit.technicianName.ifBlank { "Technician not set" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(visit.jobType, color = GalvyxCyan, fontWeight = FontWeight.SemiBold)
                 Text(visit.summary(), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (visit.expenses.isNotEmpty()) Text("Expense total: \$${String.format(Locale.US, "%.2f", expenseTotal)}", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
+                if (visit.expenses.isNotEmpty()) Text("Expense total: ${expenseTotal.toCurrencyString()}", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
                 HorizontalDivider(color = DividerDefaults.color.copy(alpha = 0.25f))
                 TwoColumnActions(
                     "Add Note" to onAddNote,
                     "Add Photo" to onAddPhoto,
                     "Add Device" to onAddDevice,
-                    "Add Expense" to onAddExpense
+                    "Add Expense" to onAddExpense,
+                    "Edit Visit" to onEditVisit
                 )
                 PrimaryAction("Export / Share PDF Report", onClick = onExport)
             }
@@ -383,17 +444,17 @@ fun VisitDetailScreen(
         item { SectionHeader("Notes", visit.notes.size) }
         if (visit.notes.isEmpty()) item { SmallEmpty("No notes yet") }
         items(visit.notes, key = { it.id }) { note ->
-            DetailCard(note.title.ifBlank { note.category }, "${note.location} • ${note.category}", note.notes, onDelete = { onDeleteNote(note) })
+            DetailCard(note.title.ifBlank { note.category }, "${note.location} • ${note.category}", note.notes, onEdit = { onEditNote(note) }, onDelete = { onDeleteNote(note) })
         }
         item { SectionHeader("Devices", visit.devices.size) }
         if (visit.devices.isEmpty()) item { SmallEmpty("No devices yet") }
         items(visit.devices, key = { it.id }) { device ->
-            DetailCard(device.hostname.ifBlank { device.deviceType }, "${device.location} • ${device.manufacturer} ${device.model}", listOf(device.ipAddress, device.macAddress, device.serialNumber, device.notes).filter { it.isNotBlank() }.joinToString("\n"), onDelete = { onDeleteDevice(device) })
+            DetailCard(device.hostname.ifBlank { device.deviceType }, "${device.location} • ${device.manufacturer} ${device.model}", listOf(device.ipAddress, device.macAddress, device.serialNumber, device.notes).filter { it.isNotBlank() }.joinToString("\n"), onEdit = { onEditDevice(device) }, onDelete = { onDeleteDevice(device) })
         }
         item { SectionHeader("Expenses", visit.expenses.size) }
         if (visit.expenses.isEmpty()) item { SmallEmpty("No expenses yet") }
         items(visit.expenses, key = { it.id }) { expense ->
-            DetailCard("${expense.vendor} ${expense.amount}".trim(), "${expense.date} • ${expense.category} • ${expense.paymentMethod}", expense.notes, onDelete = { onDeleteExpense(expense) })
+            DetailCard("${expense.vendor} ${expense.amount}".trim(), "${expense.date} • ${expense.category} • ${expense.paymentMethod}", expense.notes, onEdit = { onEditExpense(expense) }, onDelete = { onDeleteExpense(expense) })
         }
         item { SectionHeader("Photos", visit.photos.size) }
         if (visit.photos.isEmpty()) item { SmallEmpty("No photos yet") }
@@ -419,12 +480,42 @@ fun SettingsScreen(profile: CompanyProfile, onSave: (CompanyProfile) -> Unit) {
 }
 
 @Composable
-fun NoteDialog(onDismiss: () -> Unit, onSave: (VisitNote) -> Unit) {
-    var location by rememberSaveable { mutableStateOf("") }
-    var category by rememberSaveable { mutableStateOf("General Note") }
-    var title by rememberSaveable { mutableStateOf("") }
-    var notes by rememberSaveable { mutableStateOf("") }
-    FormDialog("Add Note", onDismiss, onSave = { onSave(VisitNote(location = location.trim(), category = category.trim(), title = title.trim(), notes = notes.trim())) }) {
+fun VisitDialog(visit: SiteVisit, onDismiss: () -> Unit, onSave: (SiteVisit) -> Unit) {
+    var client by rememberSaveable(visit.id) { mutableStateOf(visit.clientName) }
+    var project by rememberSaveable(visit.id) { mutableStateOf(visit.projectName) }
+    var tech by rememberSaveable(visit.id) { mutableStateOf(visit.technicianName) }
+    var date by rememberSaveable(visit.id) { mutableStateOf(visit.date) }
+    var jobType by rememberSaveable(visit.id) { mutableStateOf(visit.jobType) }
+    FormDialog("Edit Visit", onDismiss, onSave = {
+        if (client.isBlank() && project.isBlank()) return@FormDialog
+        onSave(visit.copy(clientName = client.trim(), projectName = project.trim(), technicianName = tech.trim(), date = date.trim(), jobType = jobType.trim().ifBlank { "General Service Call" }))
+    }) {
+        FormTextField("Client / Site Name", client) { client = it }
+        FormTextField("Project Name", project) { project = it }
+        FormTextField("Technician Name", tech) { tech = it }
+        FormTextField("Date", date) { date = it }
+        SimpleDropdown("Job Type", jobType, JOB_TYPES) { jobType = it }
+    }
+}
+
+@Composable
+private fun ConfirmDeleteDialog(request: DeleteRequest, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete ${request.kind.name.lowercase(Locale.US)}?") },
+        text = { Text("This will remove \"${request.title}\" from this device. This cannot be undone.") },
+        confirmButton = { Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("Delete") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+fun NoteDialog(existing: VisitNote? = null, onDismiss: () -> Unit, onSave: (VisitNote) -> Unit) {
+    var location by rememberSaveable(existing?.id) { mutableStateOf(existing?.location.orEmpty()) }
+    var category by rememberSaveable(existing?.id) { mutableStateOf(existing?.category ?: "General Note") }
+    var title by rememberSaveable(existing?.id) { mutableStateOf(existing?.title.orEmpty()) }
+    var notes by rememberSaveable(existing?.id) { mutableStateOf(existing?.notes.orEmpty()) }
+    FormDialog(if (existing == null) "Add Note" else "Edit Note", onDismiss, onSave = { onSave((existing ?: VisitNote()).copy(location = location.trim(), category = category.trim(), title = title.trim(), notes = notes.trim())) }) {
         FormTextField("Location", location) { location = it }
         SimpleDropdown("Category", category, NOTE_CATEGORIES) { category = it }
         FormTextField("Title", title) { title = it }
@@ -433,17 +524,17 @@ fun NoteDialog(onDismiss: () -> Unit, onSave: (VisitNote) -> Unit) {
 }
 
 @Composable
-fun DeviceDialog(onDismiss: () -> Unit, onSave: (DeviceInfo) -> Unit) {
-    var location by rememberSaveable { mutableStateOf("") }
-    var type by rememberSaveable { mutableStateOf("Other") }
-    var manufacturer by rememberSaveable { mutableStateOf("") }
-    var model by rememberSaveable { mutableStateOf("") }
-    var serial by rememberSaveable { mutableStateOf("") }
-    var mac by rememberSaveable { mutableStateOf("") }
-    var ip by rememberSaveable { mutableStateOf("") }
-    var hostname by rememberSaveable { mutableStateOf("") }
-    var notes by rememberSaveable { mutableStateOf("") }
-    FormDialog("Add Device", onDismiss, onSave = { onSave(DeviceInfo(location = location.trim(), deviceType = type.trim(), manufacturer = manufacturer.trim(), model = model.trim(), serialNumber = serial.trim(), macAddress = mac.trim(), ipAddress = ip.trim(), hostname = hostname.trim(), notes = notes.trim())) }) {
+fun DeviceDialog(existing: DeviceInfo? = null, onDismiss: () -> Unit, onSave: (DeviceInfo) -> Unit) {
+    var location by rememberSaveable(existing?.id) { mutableStateOf(existing?.location.orEmpty()) }
+    var type by rememberSaveable(existing?.id) { mutableStateOf(existing?.deviceType ?: "Other") }
+    var manufacturer by rememberSaveable(existing?.id) { mutableStateOf(existing?.manufacturer.orEmpty()) }
+    var model by rememberSaveable(existing?.id) { mutableStateOf(existing?.model.orEmpty()) }
+    var serial by rememberSaveable(existing?.id) { mutableStateOf(existing?.serialNumber.orEmpty()) }
+    var mac by rememberSaveable(existing?.id) { mutableStateOf(existing?.macAddress.orEmpty()) }
+    var ip by rememberSaveable(existing?.id) { mutableStateOf(existing?.ipAddress.orEmpty()) }
+    var hostname by rememberSaveable(existing?.id) { mutableStateOf(existing?.hostname.orEmpty()) }
+    var notes by rememberSaveable(existing?.id) { mutableStateOf(existing?.notes.orEmpty()) }
+    FormDialog(if (existing == null) "Add Device" else "Edit Device", onDismiss, onSave = { onSave((existing ?: DeviceInfo()).copy(location = location.trim(), deviceType = type.trim(), manufacturer = manufacturer.trim(), model = model.trim(), serialNumber = serial.trim(), macAddress = mac.trim(), ipAddress = ip.trim(), hostname = hostname.trim(), notes = notes.trim())) }) {
         FormTextField("Location", location) { location = it }
         SimpleDropdown("Device Type", type, DEVICE_TYPES) { type = it }
         FormTextField("Manufacturer", manufacturer) { manufacturer = it }
@@ -457,14 +548,14 @@ fun DeviceDialog(onDismiss: () -> Unit, onSave: (DeviceInfo) -> Unit) {
 }
 
 @Composable
-fun ExpenseDialog(onDismiss: () -> Unit, onSave: (VisitExpense) -> Unit) {
-    var date by rememberSaveable { mutableStateOf(todayString()) }
-    var category by rememberSaveable { mutableStateOf("Other") }
-    var vendor by rememberSaveable { mutableStateOf("") }
-    var amount by rememberSaveable { mutableStateOf("") }
-    var payment by rememberSaveable { mutableStateOf("Reimbursable") }
-    var notes by rememberSaveable { mutableStateOf("") }
-    FormDialog("Add Expense", onDismiss, onSave = { onSave(VisitExpense(date = date.trim(), category = category.trim(), vendor = vendor.trim(), amount = amount.trim(), paymentMethod = payment.trim(), notes = notes.trim())) }) {
+fun ExpenseDialog(existing: VisitExpense? = null, onDismiss: () -> Unit, onSave: (VisitExpense) -> Unit) {
+    var date by rememberSaveable(existing?.id) { mutableStateOf(existing?.date ?: todayString()) }
+    var category by rememberSaveable(existing?.id) { mutableStateOf(existing?.category ?: "Other") }
+    var vendor by rememberSaveable(existing?.id) { mutableStateOf(existing?.vendor.orEmpty()) }
+    var amount by rememberSaveable(existing?.id) { mutableStateOf(existing?.amount.orEmpty()) }
+    var payment by rememberSaveable(existing?.id) { mutableStateOf(existing?.paymentMethod ?: "Reimbursable") }
+    var notes by rememberSaveable(existing?.id) { mutableStateOf(existing?.notes.orEmpty()) }
+    FormDialog(if (existing == null) "Add Expense" else "Edit Expense", onDismiss, onSave = { onSave((existing ?: VisitExpense()).copy(date = date.trim(), category = category.trim(), vendor = vendor.trim(), amount = amount.trim(), paymentMethod = payment.trim(), notes = notes.trim())) }) {
         FormTextField("Date", date) { date = it }
         SimpleDropdown("Category", category, EXPENSE_CATEGORIES) { category = it }
         FormTextField("Vendor / Merchant", vendor) { vendor = it }
@@ -595,15 +686,16 @@ fun SectionHeader(title: String, count: Int) {
 }
 
 @Composable
-fun DetailCard(title: String, subtitle: String, body: String, onDelete: (() -> Unit)? = null) {
+fun DetailCard(title: String, subtitle: String, body: String, onEdit: (() -> Unit)? = null, onDelete: (() -> Unit)? = null) {
     CardPanel {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(title.ifBlank { "Untitled" }, fontWeight = FontWeight.Bold, fontSize = 17.sp)
                 if (subtitle.isNotBlank()) Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
             }
-            if (onDelete != null) {
-                TextButton(onClick = onDelete) { Text("Delete") }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (onEdit != null) TextButton(onClick = onEdit) { Text("Edit") }
+                if (onDelete != null) TextButton(onClick = onDelete) { Text("Delete") }
             }
         }
         if (body.isNotBlank()) Text(body, color = MaterialTheme.colorScheme.onSurface)
@@ -659,6 +751,8 @@ private fun todayString(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).fo
 
 fun String.toMoneyOrZero(): Double = replace("$", "").replace(",", "").trim().toDoubleOrNull() ?: 0.0
 
+fun Double.toCurrencyString(): String = "$${String.format(Locale.US, "%.2f", this)}"
+
 private fun deleteAppOwnedPhoto(context: Context, photoPath: String): Boolean = runCatching {
     val photosRoot = File(context.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "Galvyx").canonicalFile
     val target = File(photoPath).canonicalFile
@@ -676,7 +770,7 @@ private fun createPhotoUri(context: Context): Pair<String, Uri>? = runCatching {
 private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyProfile): File? = runCatching {
     val reportsDir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Galvyx/Reports")
     reportsDir.mkdirs()
-    val safeName = "Galvyx_${visit.clientName}_${visit.projectName}_${visit.date}".replace(Regex("[^A-Za-z0-9_-]+"), "_").trim('_').ifBlank { "Galvyx_Report" }
+    val safeName = "Galvyx_${visit.clientName}_${visit.projectName}_${visit.date}_${System.currentTimeMillis()}".replace(Regex("[^A-Za-z0-9_-]+"), "_").trim('_').ifBlank { "Galvyx_Report" }
     val file = File(reportsDir, "$safeName.pdf")
 
     val document = PdfDocument()
@@ -722,6 +816,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
 
     line("Galvyx Site Visit Report", titlePaint, 28f)
     line("${profile.companyName.ifBlank { "Company not set" }} • ${profile.reportFooter}")
+    line("Generated: ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())}")
     section("Visit Summary")
     line("Client/Site: ${visit.clientName}")
     line("Project: ${visit.projectName}")
@@ -765,6 +860,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
         wrapped(expense.notes)
         y += 5f
     }
+    if (visit.expenses.isNotEmpty()) line("Expense Total: ${visit.expenses.sumOf { it.amount.toMoneyOrZero() }.toCurrencyString()}", headerPaint, 22f)
 
     section("Photos")
     if (visit.photos.isEmpty()) line("No photos captured.")

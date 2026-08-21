@@ -50,4 +50,10 @@ class GalvyxModelsTest {
         assertEquals(18.5, "18.50".toMoneyOrZero(), 0.001)
         assertEquals(0.0, "not a number".toMoneyOrZero(), 0.001)
     }
+
+    @Test
+    fun currencyFormatterUsesTwoDecimalPlaces() {
+        assertEquals("$18.50", 18.5.toCurrencyString())
+        assertEquals("$0.00", 0.0.toCurrencyString())
+    }
 }
