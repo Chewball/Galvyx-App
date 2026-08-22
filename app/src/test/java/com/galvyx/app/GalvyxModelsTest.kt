@@ -28,7 +28,7 @@ class GalvyxModelsTest {
                 notes = listOf(VisitNote(location = "MDF", category = "Switch / Firewall", title = "Firewall", notes = "FCC listener checked")),
                 devices = listOf(DeviceInfo(location = "MDF", deviceType = "Firewall", manufacturer = "SonicWall", ipAddress = "10.0.31.31")),
                 expenses = listOf(VisitExpense(date = "2026-08-21", category = "Meal", vendor = "Cafe", amount = "18.50")),
-                photos = listOf(VisitPhoto(path = "/storage/photo.jpg", caption = "MDF rack"))
+                photos = listOf(VisitPhoto(path = "/storage/photo.jpg", caption = "MDF rack", category = "MDF", stage = "Before"))
             )
         )
 
@@ -42,6 +42,8 @@ class GalvyxModelsTest {
         assertEquals("10.0.31.31", restored.first().devices.first().ipAddress)
         assertEquals("18.50", restored.first().expenses.first().amount)
         assertEquals("MDF rack", restored.first().photos.first().caption)
+        assertEquals("MDF", restored.first().photos.first().category)
+        assertEquals("Before", restored.first().photos.first().stage)
     }
 
     @Test
@@ -67,12 +69,13 @@ class GalvyxModelsTest {
             notes = listOf(VisitNote(location = "MDF", title = "Firewall", notes = "FCC listener checked")),
             devices = listOf(DeviceInfo(hostname = "sw-core", ipAddress = "10.0.31.31")),
             expenses = listOf(VisitExpense(vendor = "Fuel Stop", amount = "\$42.10")),
-            photos = listOf(VisitPhoto(path = "/tmp/photo.jpg", caption = "Rack overview"))
+            photos = listOf(VisitPhoto(path = "/tmp/photo.jpg", caption = "Rack overview", category = "MDF", stage = "After"))
         )
 
         assertEquals(true, visit.matchesSearch("tahoe"))
         assertEquals(true, visit.matchesSearch("10.0.31.31"))
         assertEquals(true, visit.matchesSearch("rack overview"))
+        assertEquals(true, visit.matchesSearch("mdf after"))
         assertEquals(false, visit.matchesSearch("unknown-client"))
     }
 

@@ -159,18 +159,27 @@ data class VisitExpense(
 data class VisitPhoto(
     val id: String = UUID.randomUUID().toString(),
     val path: String,
-    val caption: String = ""
+    val caption: String = "",
+    val category: String = "General",
+    val stage: String = "Reference"
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
         .put("path", path)
         .put("caption", caption)
+        .put("category", category)
+        .put("stage", stage)
+
+    val reportLabel: String
+        get() = listOf(category, stage).filter { it.isNotBlank() }.joinToString(" • ").ifBlank { "Photo" }
 
     companion object {
         fun fromJson(json: JSONObject): VisitPhoto = VisitPhoto(
             id = json.optString("id", UUID.randomUUID().toString()),
             path = json.optString("path"),
-            caption = json.optString("caption")
+            caption = json.optString("caption"),
+            category = json.optString("category", "General"),
+            stage = json.optString("stage", "Reference")
         )
     }
 }
@@ -204,7 +213,7 @@ data class SiteVisit(
             notes.joinToString(" ") { listOf(it.location, it.category, it.title, it.notes).joinToString(" ") },
             devices.joinToString(" ") { listOf(it.location, it.deviceType, it.manufacturer, it.model, it.serialNumber, it.macAddress, it.ipAddress, it.hostname, it.notes).joinToString(" ") },
             expenses.joinToString(" ") { listOf(it.date, it.category, it.vendor, it.amount, it.paymentMethod, it.notes).joinToString(" ") },
-            photos.joinToString(" ") { it.caption }
+            photos.joinToString(" ") { listOf(it.category, it.stage, it.caption).joinToString(" ") }
         ).joinToString(" ").lowercase().contains(normalized)
     }
 

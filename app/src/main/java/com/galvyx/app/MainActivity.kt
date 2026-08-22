@@ -104,6 +104,8 @@ private val NOTE_CATEGORIES = listOf("General Note", "Network Port", "Switch / F
 private val DEVICE_TYPES = listOf("Firewall", "Switch", "Access Point", "Camera", "NVR / DVR", "Server", "Workstation", "Printer", "Payment Terminal", "Time Clock", "UPS / Battery Backup", "Other")
 private val EXPENSE_CATEGORIES = listOf("Meal", "Gas", "Hotel", "Parking", "Tools / Supplies", "Equipment", "Mileage", "Toll", "Shipping", "Other")
 private val PAYMENT_METHODS = listOf("Personal Card", "Company Card", "Cash", "Reimbursable", "Other")
+private val PHOTO_CATEGORIES = listOf("General", "MDF", "IDF", "Rack", "Firewall", "Switch", "Access Point", "Camera", "Cabling", "Damage", "Receipt", "Before / After", "Other")
+private val PHOTO_STAGES = listOf("Reference", "Before", "After", "Issue Found", "Completed Work", "Receipt")
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -925,9 +927,21 @@ fun ExpenseDialog(existing: VisitExpense? = null, onDismiss: () -> Unit, onSave:
 
 @Composable
 fun PhotoCaptionDialog(existing: VisitPhoto? = null, onDismiss: () -> Unit, onSave: (VisitPhoto) -> Unit) {
+    var category by rememberSaveable(existing?.id) { mutableStateOf(existing?.category ?: "General") }
+    var stage by rememberSaveable(existing?.id) { mutableStateOf(existing?.stage ?: "Reference") }
     var caption by rememberSaveable(existing?.id) { mutableStateOf(existing?.caption.orEmpty()) }
-    FormDialog(if (existing == null) "Photo Saved" else "Edit Photo Caption", onDismiss, saveLabel = if (existing == null) "Attach Photo" else "Save Caption", onSave = { onSave((existing ?: VisitPhoto(path = "")).copy(caption = caption.trim())) }) {
-        Text("Add a short caption so the report makes sense later.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    FormDialog(if (existing == null) "Photo Saved" else "Edit Photo Details", onDismiss, saveLabel = if (existing == null) "Attach Photo" else "Save Photo", onSave = {
+        onSave(
+            (existing ?: VisitPhoto(path = "")).copy(
+                category = category.trim().ifBlank { "General" },
+                stage = stage.trim().ifBlank { "Reference" },
+                caption = caption.trim()
+            )
+        )
+    }) {
+        Text("Tag the photo so reports can group before/after work and key network areas.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        SimpleDropdown("Category", category, PHOTO_CATEGORIES) { category = it }
+        SimpleDropdown("Stage", stage, PHOTO_STAGES) { stage = it }
         FormTextField("Caption", caption) { caption = it }
     }
 }
@@ -1210,8 +1224,8 @@ fun PhotoDetailCard(photo: VisitPhoto, onEdit: () -> Unit, onDelete: () -> Unit)
     CardPanel {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(photo.caption.ifBlank { "Photo" }, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                Text("Saved locally", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                Text(photo.caption.ifBlank { photo.category.ifBlank { "Photo" } }, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                Text("${photo.reportLabel} • Saved locally", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = onEdit) { Text("Edit") }
@@ -1399,21 +1413,27 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
 
     section("Photos")
     if (visit.photos.isEmpty()) line("No photos captured.")
-    visit.photos.forEachIndexed { index, photo ->
-        line("${index + 1}. ${photo.caption.ifBlank { "Photo" }}")
-        val bitmap = loadBitmap(context, photo.path)
-        if (bitmap != null) {
-            if (y > 610f) newPage()
-            val maxWidth = 220f
-            val scale = maxWidth / bitmap.width
-            val width = maxWidth
-            val height = bitmap.height * scale
-            canvas.drawBitmap(bitmap, null, android.graphics.RectF(42f, y, 42f + width, y + height.coerceAtMost(150f)), null)
-            y += height.coerceAtMost(150f) + 12f
-        } else {
-            line(photo.path)
+    visit.photos
+        .groupBy { it.category.ifBlank { "General" } }
+        .forEach { (category, categoryPhotos) ->
+            line(category, headerPaint, 20f)
+            categoryPhotos.forEachIndexed { index, photo ->
+                val title = "${index + 1}. ${photo.stage.ifBlank { "Reference" }}${if (photo.caption.isNotBlank()) ": ${photo.caption}" else ""}"
+                line(title)
+                val bitmap = loadBitmap(context, photo.path)
+                if (bitmap != null) {
+                    if (y > 610f) newPage()
+                    val maxWidth = 220f
+                    val scale = maxWidth / bitmap.width
+                    val width = maxWidth
+                    val height = bitmap.height * scale
+                    canvas.drawBitmap(bitmap, null, android.graphics.RectF(42f, y, 42f + width, y + height.coerceAtMost(150f)), null)
+                    y += height.coerceAtMost(150f) + 12f
+                } else {
+                    line(photo.path)
+                }
+            }
         }
-    }
 
     footer()
     document.finishPage(page)
