@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -191,6 +192,18 @@ fun GalvyxApp(context: Context) {
         }
     }
 
+    fun navigateBackInApp() {
+        when (screen) {
+            Screen.Home -> Unit
+            Screen.VisitDetail -> screen = Screen.Recent
+            else -> screen = Screen.Home
+        }
+    }
+
+    BackHandler(enabled = screen != Screen.Home) {
+        navigateBackInApp()
+    }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -199,7 +212,7 @@ fun GalvyxApp(context: Context) {
                 TopAppBar(
                     title = { Text(screen.title()) },
                     navigationIcon = {
-                        TextButton(onClick = { screen = if (screen == Screen.VisitDetail) Screen.Recent else Screen.Home }) {
+                        TextButton(onClick = { navigateBackInApp() }) {
                             Text("Back")
                         }
                     }
