@@ -254,6 +254,31 @@ fun visitsFromJson(raw: String?): List<SiteVisit> {
     }.getOrDefault(emptyList())
 }
 
+data class GalvyxBackup(
+    val profile: CompanyProfile,
+    val visits: List<SiteVisit>
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("schema", "com.galvyx.backup")
+        .put("version", 1)
+        .put("profile", profile.toJson())
+        .put("visits", visits.toJsonArray { it.toJson() })
+
+    companion object {
+        fun fromJson(raw: String): GalvyxBackup {
+            val json = JSONObject(raw)
+            return GalvyxBackup(
+                profile = json.optJSONObject("profile")?.let { CompanyProfile.fromJson(it) } ?: CompanyProfile(),
+                visits = json.optJSONArray("visits").toList { SiteVisit.fromJson(it) }
+            )
+        }
+    }
+}
+
+fun backupToJson(profile: CompanyProfile, visits: List<SiteVisit>): String = GalvyxBackup(profile, visits).toJson().toString()
+
+fun backupFromJson(raw: String): GalvyxBackup? = runCatching { GalvyxBackup.fromJson(raw) }.getOrNull()
+
 private fun <T> List<T>.toJsonArray(transform: (T) -> JSONObject): JSONArray {
     val array = JSONArray()
     forEach { array.put(transform(it)) }

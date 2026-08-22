@@ -109,4 +109,26 @@ class GalvyxModelsTest {
         assertEquals("Documents", restored.sharePointLibraryName)
         assertEquals("Galvyx/Site Visits", restored.sharePointFolderPath)
     }
+
+    @Test
+    fun backupJsonRoundTripPreservesProfileAndVisits() {
+        val profile = CompanyProfile(companyName = "Acme", technicianName = "Omar", localReportsFolder = "Reports")
+        val visits = listOf(
+            SiteVisit(
+                clientName = "Reset",
+                projectName = "Tahoe",
+                notes = listOf(VisitNote(title = "MDF")),
+                photos = listOf(VisitPhoto(path = "content://photo", caption = "Rack"))
+            )
+        )
+
+        val restored = backupFromJson(backupToJson(profile, visits))
+
+        assertEquals("Acme", restored?.profile?.companyName)
+        assertEquals("Omar", restored?.profile?.technicianName)
+        assertEquals(1, restored?.visits?.size)
+        assertEquals("Reset", restored?.visits?.first()?.clientName)
+        assertEquals("MDF", restored?.visits?.first()?.notes?.first()?.title)
+        assertEquals("Rack", restored?.visits?.first()?.photos?.first()?.caption)
+    }
 }

@@ -191,6 +191,26 @@ fun GalvyxApp(context: Context) {
             Toast.makeText(context, "Photos folder selected", Toast.LENGTH_SHORT).show()
         }
     }
+    val backupExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            val success = exportBackupJson(context, uri, profile, visits)
+            Toast.makeText(context, if (success) "Backup exported" else "Backup export failed", Toast.LENGTH_LONG).show()
+        }
+    }
+    val backupImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            val backup = importBackupJson(context, uri)
+            if (backup == null) {
+                Toast.makeText(context, "Backup import failed", Toast.LENGTH_LONG).show()
+            } else {
+                visits.clear()
+                visits.addAll(backup.visits)
+                persistVisits()
+                persistProfile(backup.profile)
+                Toast.makeText(context, "Backup imported", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     fun navigateBackInApp() {
         when (screen) {
@@ -275,7 +295,9 @@ fun GalvyxApp(context: Context) {
                     onChooseReportsFolder = { reportsFolderLauncher.launch(null) },
                     onClearReportsFolder = { persistProfile(profile.copy(localReportsTreeUri = "")) },
                     onChoosePhotosFolder = { photosFolderLauncher.launch(null) },
-                    onClearPhotosFolder = { persistProfile(profile.copy(localPhotosTreeUri = "")) }
+                    onClearPhotosFolder = { persistProfile(profile.copy(localPhotosTreeUri = "")) },
+                    onExportBackup = { backupExportLauncher.launch(defaultBackupFileName()) },
+                    onImportBackup = { backupImportLauncher.launch("application/json") }
                 )
             }
         }
@@ -780,7 +802,9 @@ fun SettingsScreen(
     onChooseReportsFolder: () -> Unit,
     onClearReportsFolder: () -> Unit,
     onChoosePhotosFolder: () -> Unit,
-    onClearPhotosFolder: () -> Unit
+    onClearPhotosFolder: () -> Unit,
+    onExportBackup: () -> Unit,
+    onImportBackup: () -> Unit
 ) {
     var company by rememberSaveable(profile.companyName) { mutableStateOf(profile.companyName) }
     var tech by rememberSaveable(profile.technicianName) { mutableStateOf(profile.technicianName) }
@@ -822,6 +846,14 @@ fun SettingsScreen(
                 onChoose = onChoosePhotosFolder,
                 onClear = onClearPhotosFolder
             )
+        }
+
+        Spacer(Modifier.height(6.dp))
+        Text("Backup & Restore", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Uninstalling Android apps deletes their private app data. Export a Galvyx backup before removing the app, then import it after reinstalling.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onExportBackup, modifier = Modifier.weight(1f)) { Text("Export Backup") }
+            OutlinedButton(onClick = onImportBackup, modifier = Modifier.weight(1f)) { Text("Import Backup") }
         }
 
         if (StorageMode.fromLabel(storageMode) == StorageMode.SharePoint) {
@@ -1286,6 +1318,21 @@ private fun todayString(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).fo
 fun String.toMoneyOrZero(): Double = replace("$", "").replace(",", "").trim().toDoubleOrNull() ?: 0.0
 
 fun Double.toCurrencyString(): String = "$${String.format(Locale.US, "%.2f", this)}"
+
+private fun defaultBackupFileName(): String = "galvyx-backup-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.json"
+
+private fun exportBackupJson(context: Context, uri: Uri, profile: CompanyProfile, visits: List<SiteVisit>): Boolean = runCatching {
+    context.contentResolver.openOutputStream(uri)?.use { stream ->
+        stream.write(backupToJson(profile, visits).toByteArray(Charsets.UTF_8))
+    } ?: return@runCatching false
+    true
+}.getOrDefault(false)
+
+private fun importBackupJson(context: Context, uri: Uri): GalvyxBackup? = runCatching {
+    val raw = context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+        ?: return@runCatching null
+    backupFromJson(raw)
+}.getOrNull()
 
 private fun appStorageDir(context: Context, type: String, rootFolder: String, childFolder: String): File {
     val root = safeFolderSegment(rootFolder).ifBlank { "Galvyx" }
