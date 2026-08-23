@@ -99,6 +99,7 @@ import java.util.Locale
 private const val PREFS_NAME = "galvyx_local_store"
 private const val PREF_VISITS = "visits"
 private const val PREF_PROFILE = "profile"
+private const val AUTO_BACKUP_FILE_NAME = "galvyx-auto-backup.json"
 
 private val JOB_TYPES = listOf("General Service Call", "Network Survey", "Camera / Security", "Access Point / Wi-Fi", "Workstation Replacement", "Server / Firewall", "Low Voltage / Cabling", "Inspection", "Other")
 private val NOTE_CATEGORIES = listOf("General Note", "Network Port", "Switch / Firewall", "Access Point / Wi-Fi", "Camera", "Workstation", "Server", "Cable / Low Voltage", "Power", "Expense / Receipt", "Issue Found", "Completed Work", "Follow-Up Needed")
@@ -149,11 +150,13 @@ fun GalvyxApp(context: Context) {
 
     fun persistVisits() {
         prefs.edit().putString(PREF_VISITS, visitsToJson(visits)).apply()
+        saveAutoBackup(context, profile, visits)
     }
 
     fun persistProfile(next: CompanyProfile) {
         profile = next
         prefs.edit().putString(PREF_PROFILE, next.toJson().toString()).apply()
+        saveAutoBackup(context, next, visits)
     }
 
     fun upsertVisit(visit: SiteVisit) {
@@ -191,6 +194,15 @@ fun GalvyxApp(context: Context) {
             Toast.makeText(context, "Photos folder selected", Toast.LENGTH_SHORT).show()
         }
     }
+    val backupFolderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            val next = profile.copy(backupTreeUri = uri.toString(), autoBackupEnabled = true)
+            persistProfile(next)
+            val success = saveAutoBackup(context, next, visits)
+            Toast.makeText(context, if (success) "Auto backup enabled" else "Backup folder selected, but first backup failed", Toast.LENGTH_LONG).show()
+        }
+    }
     val backupExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
             val success = exportBackupJson(context, uri, profile, visits)
@@ -206,8 +218,8 @@ fun GalvyxApp(context: Context) {
                 visits.clear()
                 visits.addAll(backup.visits)
                 persistVisits()
-                persistProfile(backup.profile)
-                Toast.makeText(context, "Backup imported", Toast.LENGTH_LONG).show()
+                persistProfile(backup.profile.withClearedFolderPermissions())
+                Toast.makeText(context, "Backup imported. Choose backup/photo folders again if needed.", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -296,6 +308,9 @@ fun GalvyxApp(context: Context) {
                     onClearReportsFolder = { persistProfile(profile.copy(localReportsTreeUri = "")) },
                     onChoosePhotosFolder = { photosFolderLauncher.launch(null) },
                     onClearPhotosFolder = { persistProfile(profile.copy(localPhotosTreeUri = "")) },
+                    onChooseBackupFolder = { backupFolderLauncher.launch(null) },
+                    onClearBackupFolder = { persistProfile(profile.copy(backupTreeUri = "", autoBackupEnabled = false)) },
+                    onToggleAutoBackup = { enabled -> persistProfile(profile.copy(autoBackupEnabled = enabled && profile.backupTreeUri.isNotBlank())) },
                     onExportBackup = { backupExportLauncher.launch(defaultBackupFileName()) },
                     onImportBackup = { backupImportLauncher.launch("application/json") }
                 )
@@ -803,6 +818,9 @@ fun SettingsScreen(
     onClearReportsFolder: () -> Unit,
     onChoosePhotosFolder: () -> Unit,
     onClearPhotosFolder: () -> Unit,
+    onChooseBackupFolder: () -> Unit,
+    onClearBackupFolder: () -> Unit,
+    onToggleAutoBackup: (Boolean) -> Unit,
     onExportBackup: () -> Unit,
     onImportBackup: () -> Unit
 ) {
@@ -850,7 +868,28 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(6.dp))
         Text("Backup & Restore", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Text("Uninstalling Android apps deletes their private app data. Export a Galvyx backup before removing the app, then import it after reinstalling.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Recommended: choose a backup folder once. Galvyx will keep an automatic backup there after every saved change. After reinstalling, use Import Backup and choose galvyx-auto-backup.json.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FolderPickerRow(
+            title = "Automatic Backup Folder",
+            uri = profile.backupTreeUri,
+            emptyText = "Auto backup is off",
+            clearText = "Turn Off",
+            onChoose = onChooseBackupFolder,
+            onClear = onClearBackupFolder
+        )
+        if (profile.backupTreeUri.isNotBlank()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { onToggleAutoBackup(!profile.autoBackupEnabled) }, modifier = Modifier.weight(1f)) {
+                    Text(if (profile.autoBackupEnabled) "Pause Auto Backup" else "Resume Auto Backup")
+                }
+                Text(
+                    if (profile.autoBackupEnabled) "Auto backup: On" else "Auto backup: Paused",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f).align(Alignment.CenterVertically)
+                )
+            }
+        }
+        HintText("Manual export is still available for one-off backups. Uninstalling Android apps deletes private app data, so keep backups/photos in a folder outside the app.")
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(onClick = onExportBackup, modifier = Modifier.weight(1f)) { Text("Export Backup") }
             OutlinedButton(onClick = onImportBackup, modifier = Modifier.weight(1f)) { Text("Import Backup") }
@@ -875,6 +914,8 @@ fun SettingsScreen(
                     localPhotosFolder = localPhotosFolder.trim().ifBlank { "Photos" },
                     localReportsTreeUri = profile.localReportsTreeUri,
                     localPhotosTreeUri = profile.localPhotosTreeUri,
+                    backupTreeUri = profile.backupTreeUri,
+                    autoBackupEnabled = profile.autoBackupEnabled,
                     sharePointSiteUrl = sharePointSiteUrl.trim(),
                     sharePointLibraryName = sharePointLibrary.trim().ifBlank { "Documents" },
                     sharePointFolderPath = sharePointFolder.trim().ifBlank { "Galvyx/Site Visits" }
@@ -1195,13 +1236,20 @@ fun SimpleDropdown(label: String, selected: String, options: List<String>, onSel
 }
 
 @Composable
-fun FolderPickerRow(title: String, uri: String, onChoose: () -> Unit, onClear: () -> Unit) {
+fun FolderPickerRow(
+    title: String,
+    uri: String,
+    emptyText: String = "Using Galvyx app storage",
+    clearText: String = "Use Default",
+    onChoose: () -> Unit,
+    onClear: () -> Unit
+) {
     CardPanel {
         Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        Text(if (uri.isBlank()) "Using Galvyx app storage" else folderLabel(uri), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+        Text(if (uri.isBlank()) emptyText else folderLabel(uri), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onChoose, modifier = Modifier.weight(1f)) { Text(if (uri.isBlank()) "Choose Folder" else "Change Folder") }
-            if (uri.isNotBlank()) OutlinedButton(onClick = onClear, modifier = Modifier.weight(1f)) { Text("Use Default") }
+            if (uri.isNotBlank()) OutlinedButton(onClick = onClear, modifier = Modifier.weight(1f)) { Text(clearText) }
         }
     }
 }
@@ -1321,11 +1369,26 @@ fun Double.toCurrencyString(): String = "$${String.format(Locale.US, "%.2f", thi
 
 private fun defaultBackupFileName(): String = "galvyx-backup-${SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())}.json"
 
+private fun CompanyProfile.withClearedFolderPermissions(): CompanyProfile = copy(
+    localReportsTreeUri = "",
+    localPhotosTreeUri = "",
+    backupTreeUri = "",
+    autoBackupEnabled = false
+)
+
 private fun exportBackupJson(context: Context, uri: Uri, profile: CompanyProfile, visits: List<SiteVisit>): Boolean = runCatching {
     context.contentResolver.openOutputStream(uri)?.use { stream ->
         stream.write(backupToJson(profile, visits).toByteArray(Charsets.UTF_8))
     } ?: return@runCatching false
     true
+}.getOrDefault(false)
+
+private fun saveAutoBackup(context: Context, profile: CompanyProfile, visits: List<SiteVisit>): Boolean = runCatching {
+    if (!profile.autoBackupEnabled || profile.backupTreeUri.isBlank()) return@runCatching false
+    val tree = DocumentFile.fromTreeUri(context, Uri.parse(profile.backupTreeUri)) ?: return@runCatching false
+    tree.findFile(AUTO_BACKUP_FILE_NAME)?.delete()
+    val file = tree.createFile("application/json", AUTO_BACKUP_FILE_NAME) ?: return@runCatching false
+    exportBackupJson(context, file.uri, profile, visits)
 }.getOrDefault(false)
 
 private fun importBackupJson(context: Context, uri: Uri): GalvyxBackup? = runCatching {

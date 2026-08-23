@@ -24,6 +24,8 @@ data class CompanyProfile(
     val localPhotosFolder: String = "Photos",
     val localReportsTreeUri: String = "",
     val localPhotosTreeUri: String = "",
+    val backupTreeUri: String = "",
+    val autoBackupEnabled: Boolean = false,
     val sharePointSiteUrl: String = "",
     val sharePointLibraryName: String = "Documents",
     val sharePointFolderPath: String = "Galvyx/Site Visits"
@@ -38,6 +40,8 @@ data class CompanyProfile(
         .put("localPhotosFolder", localPhotosFolder)
         .put("localReportsTreeUri", localReportsTreeUri)
         .put("localPhotosTreeUri", localPhotosTreeUri)
+        .put("backupTreeUri", backupTreeUri)
+        .put("autoBackupEnabled", autoBackupEnabled)
         .put("sharePointSiteUrl", sharePointSiteUrl)
         .put("sharePointLibraryName", sharePointLibraryName)
         .put("sharePointFolderPath", sharePointFolderPath)
@@ -53,6 +57,8 @@ data class CompanyProfile(
             localPhotosFolder = json.optString("localPhotosFolder", "Photos"),
             localReportsTreeUri = json.optString("localReportsTreeUri"),
             localPhotosTreeUri = json.optString("localPhotosTreeUri"),
+            backupTreeUri = json.optString("backupTreeUri"),
+            autoBackupEnabled = json.optBoolean("autoBackupEnabled", false),
             sharePointSiteUrl = json.optString("sharePointSiteUrl"),
             sharePointLibraryName = json.optString("sharePointLibraryName", "Documents"),
             sharePointFolderPath = json.optString("sharePointFolderPath", "Galvyx/Site Visits")
