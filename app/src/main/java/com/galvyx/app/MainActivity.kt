@@ -76,6 +76,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -595,73 +596,12 @@ fun ConstellationBackdrop(modifier: Modifier = Modifier) {
 
 @Composable
 fun GalvyxLogo(modifier: Modifier = Modifier) {
-    val primary = MaterialTheme.colorScheme.primary
-    val secondary = MaterialTheme.colorScheme.secondary
-    val surface = MaterialTheme.colorScheme.surfaceVariant
-    val onPrimary = MaterialTheme.colorScheme.onPrimary
-
-    Box(
-        modifier = modifier
-            .size(88.dp)
-            .background(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        primary.copy(alpha = 0.95f),
-                        secondary.copy(alpha = 0.38f),
-                        surface.copy(alpha = 0.18f)
-                    )
-                ),
-                shape = CircleShape
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(modifier = Modifier.size(88.dp)) {
-            drawCircle(
-                color = secondary.copy(alpha = 0.18f),
-                radius = size.minDimension / 2.3f,
-                center = center
-            )
-            drawArc(
-                color = secondary.copy(alpha = 0.9f),
-                startAngle = -18f,
-                sweepAngle = 230f,
-                useCenter = false,
-                topLeft = Offset(size.width * 0.12f, size.height * 0.30f),
-                size = Size(size.width * 0.76f, size.height * 0.40f),
-                style = Stroke(width = 3.5f)
-            )
-            drawArc(
-                color = primary.copy(alpha = 0.75f),
-                startAngle = 205f,
-                sweepAngle = 125f,
-                useCenter = false,
-                topLeft = Offset(size.width * 0.18f, size.height * 0.24f),
-                size = Size(size.width * 0.64f, size.height * 0.52f),
-                style = Stroke(width = 2.2f)
-            )
-            drawCircle(
-                color = secondary,
-                radius = 3.8f,
-                center = Offset(size.width * 0.80f, size.height * 0.40f)
-            )
-        }
-
-        Surface(
-            modifier = Modifier.size(48.dp),
-            shape = RoundedCornerShape(14.dp),
-            color = primary.copy(alpha = 0.95f),
-            border = BorderStroke(1.dp, secondary.copy(alpha = 0.55f))
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = "G",
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = onPrimary
-                )
-            }
-        }
-    }
+    Image(
+        painter = painterResource(id = R.drawable.galvyx_mark),
+        contentDescription = "Galvyx logo",
+        modifier = modifier.size(104.dp),
+        contentScale = ContentScale.Fit
+    )
 }
 
 
