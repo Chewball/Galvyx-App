@@ -15,6 +15,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -91,6 +92,9 @@ import com.galvyx.app.ui.theme.GalvyxCardElevated
 import com.galvyx.app.ui.theme.GalvyxCyan
 import com.galvyx.app.ui.theme.GalvyxTheme
 import com.galvyx.app.ui.theme.GalvyxVioletBright
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import java.io.File
 import java.io.OutputStream
 import java.text.SimpleDateFormat
@@ -169,6 +173,18 @@ fun GalvyxApp(context: Context) {
 
     fun selectedVisit(): SiteVisit? = visits.firstOrNull { it.id == selectedVisitId }
 
+    fun addReceiptPathToExpense(expenseId: String, receiptPath: String) {
+        selectedVisit()?.let { current ->
+            upsertVisit(
+                current.copy(
+                    expenses = current.expenses.map { expense ->
+                        if (expense.id == expenseId) expense.copy(receiptPhotoPaths = expense.receiptPhotoPaths + receiptPath) else expense
+                    }
+                )
+            )
+        }
+    }
+
     fun openVisit(visit: SiteVisit) {
         selectedVisitId = visit.id
         screen = Screen.VisitDetail
@@ -178,15 +194,7 @@ fun GalvyxApp(context: Context) {
         val capturedPath = pendingPhotoPath
         val receiptExpenseId = pendingExpenseReceiptId
         if (success && capturedPath != null && receiptExpenseId != null) {
-            selectedVisit()?.let { current ->
-                upsertVisit(
-                    current.copy(
-                        expenses = current.expenses.map { expense ->
-                            if (expense.id == receiptExpenseId) expense.copy(receiptPhotoPaths = expense.receiptPhotoPaths + capturedPath) else expense
-                        }
-                    )
-                )
-            }
+            addReceiptPathToExpense(receiptExpenseId, capturedPath)
             pendingPhotoPath = null
             pendingPhotoUri = null
             pendingExpenseReceiptId = null
@@ -200,7 +208,25 @@ fun GalvyxApp(context: Context) {
         }
     }
 
-    fun launchExpenseReceiptScan(expenseId: String) {
+    val documentScannerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        val receiptExpenseId = pendingExpenseReceiptId
+        if (result.resultCode == android.app.Activity.RESULT_OK && receiptExpenseId != null) {
+            val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
+            val pageUri = scanResult?.pages?.firstOrNull()?.imageUri
+            val savedPath = pageUri?.let { saveReceiptScanFromUri(context, profile, it) }
+            if (savedPath != null) {
+                addReceiptPathToExpense(receiptExpenseId, savedPath)
+                Toast.makeText(context, "Enhanced receipt scan attached", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Could not save receipt scan", Toast.LENGTH_LONG).show()
+            }
+        }
+        pendingPhotoPath = null
+        pendingPhotoUri = null
+        pendingExpenseReceiptId = null
+    }
+
+    fun launchExpenseCameraFallback(expenseId: String) {
         val created = createPhotoUri(context, profile, prefix = "receipt")
         if (created == null) {
             Toast.makeText(context, "Could not create receipt image", Toast.LENGTH_LONG).show()
@@ -210,6 +236,30 @@ fun GalvyxApp(context: Context) {
             pendingExpenseReceiptId = expenseId
             takePictureLauncher.launch(created.second)
         }
+    }
+
+    fun launchExpenseReceiptScan(expenseId: String) {
+        val activity = context as? ComponentActivity
+        if (activity == null) {
+            launchExpenseCameraFallback(expenseId)
+            return
+        }
+        pendingExpenseReceiptId = expenseId
+        val options = GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(true)
+            .setPageLimit(1)
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .build()
+        GmsDocumentScanning.getClient(options)
+            .getStartScanIntent(activity)
+            .addOnSuccessListener { sender ->
+                documentScannerLauncher.launch(IntentSenderRequest.Builder(sender).build())
+            }
+            .addOnFailureListener {
+                Toast.makeText(context, "Document scanner unavailable; opening camera", Toast.LENGTH_LONG).show()
+                launchExpenseCameraFallback(expenseId)
+            }
     }
     val reportsFolderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -1010,7 +1060,7 @@ fun ExpenseDialog(existing: VisitExpense? = null, onDismiss: () -> Unit, onSave:
         FormTextField("Notes", notes, minLines = 3) { notes = it }
         if (onSaveAndScanReceipt != null) {
             OutlinedButton(onClick = { onSaveAndScanReceipt(currentExpense()) }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (existing == null) "Save & Scan Receipt" else "Save & Scan Another Receipt")
+                Text(if (existing == null) "Save & Document Scan Receipt" else "Save & Scan Another Receipt")
             }
             HintText("Use this from the expense form when you are entering mileage, meal, parts, or other advanced expense details.")
         }
@@ -1383,7 +1433,7 @@ fun ExpenseDetailCard(expense: VisitExpense, onScanReceipt: () -> Unit, onEdit: 
             }
         }
         if (expense.notes.isNotBlank()) Text(expense.notes, color = MaterialTheme.colorScheme.onSurface)
-        OutlinedButton(onClick = onScanReceipt, modifier = Modifier.fillMaxWidth()) { Text("Scan / Add Receipt Photo") }
+        OutlinedButton(onClick = onScanReceipt, modifier = Modifier.fillMaxWidth()) { Text("Document Scan Receipt")}
         if (expense.receiptPhotoPaths.isNotEmpty()) {
             val context = LocalContext.current
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1533,6 +1583,26 @@ private fun createPhotoUri(context: Context, profile: CompanyProfile, prefix: St
     val file = File(dir, fileName)
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     file.absolutePath to uri
+}.getOrNull()
+
+private fun saveReceiptScanFromUri(context: Context, profile: CompanyProfile, sourceUri: Uri): String? = runCatching {
+    val fileName = "receipt_scan_${System.currentTimeMillis()}.jpg"
+    val input = context.contentResolver.openInputStream(sourceUri) ?: return@runCatching null
+    input.use { source ->
+        if (profile.localPhotosTreeUri.isNotBlank()) {
+            val tree = DocumentFile.fromTreeUri(context, Uri.parse(profile.localPhotosTreeUri)) ?: return@runCatching null
+            val file = tree.createFile("image/jpeg", fileName) ?: return@runCatching null
+            val output = context.contentResolver.openOutputStream(file.uri) ?: return@runCatching null
+            output.use { source.copyTo(it) }
+            file.uri.toString()
+        } else {
+            val dir = appStorageDir(context, Environment.DIRECTORY_PICTURES, profile.localRootFolder, profile.localPhotosFolder)
+            dir.mkdirs()
+            val file = File(dir, fileName)
+            file.outputStream().use { source.copyTo(it) }
+            file.absolutePath
+        }
+    }
 }.getOrNull()
 
 private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyProfile): ExportedReport? = runCatching {

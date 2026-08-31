@@ -7,7 +7,7 @@ Use Galvyx to capture visit details, work notes, photos, device information, and
 ## Features
 
 - Create and manage site visit records.
-- Capture notes, devices, expenses, photos, and receipt scans.
+- Capture notes, devices, expenses, photos, and document-quality receipt scans.
 - Attach one or more receipt photos to each expense.
 - Calculate expense totals with breakdowns by category, payment method, reimbursement status, and receipt coverage.
 - Edit visit headers, notes, devices, expenses, and photo captions.
