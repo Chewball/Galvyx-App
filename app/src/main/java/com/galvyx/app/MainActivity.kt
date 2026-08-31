@@ -1540,13 +1540,16 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     val target = createReportTarget(context, profile, "$safeName.pdf") ?: return@runCatching null
 
     val document = PdfDocument()
-    val titlePaint = Paint().apply { textSize = 22f; isFakeBoldText = true }
-    val headerPaint = Paint().apply { textSize = 16f; isFakeBoldText = true }
-    val bodyPaint = Paint().apply { textSize = 11f }
-    val footerPaint = Paint().apply { textSize = 9f }
+    val pdfScale = 3f
+    val logicalPageWidth = 612
+    val logicalPageHeight = 792
+    val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; isFakeBoldText = true }
+    val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 16f; isFakeBoldText = true }
+    val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f }
+    val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9f }
     var pageNumber = 1
-    var page = document.startPage(PdfDocument.PageInfo.Builder(612, 792, pageNumber).create())
-    var canvas = page.canvas
+    var page = document.startPage(PdfDocument.PageInfo.Builder((logicalPageWidth * pdfScale).toInt(), (logicalPageHeight * pdfScale).toInt(), pageNumber).create())
+    var canvas = page.canvas.apply { scale(pdfScale, pdfScale) }
     var y = 48f
 
     fun footer() {
@@ -1558,8 +1561,8 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
         footer()
         document.finishPage(page)
         pageNumber += 1
-        page = document.startPage(PdfDocument.PageInfo.Builder(612, 792, pageNumber).create())
-        canvas = page.canvas
+        page = document.startPage(PdfDocument.PageInfo.Builder((logicalPageWidth * pdfScale).toInt(), (logicalPageHeight * pdfScale).toInt(), pageNumber).create())
+        canvas = page.canvas.apply { scale(pdfScale, pdfScale) }
         y = 48f
     }
 
