@@ -199,6 +199,18 @@ fun GalvyxApp(context: Context) {
             pendingExpenseReceiptId = null
         }
     }
+
+    fun launchExpenseReceiptScan(expenseId: String) {
+        val created = createPhotoUri(context, profile, prefix = "receipt")
+        if (created == null) {
+            Toast.makeText(context, "Could not create receipt image", Toast.LENGTH_LONG).show()
+        } else {
+            pendingPhotoPath = created.first
+            pendingPhotoUri = created.second
+            pendingExpenseReceiptId = expenseId
+            takePictureLauncher.launch(created.second)
+        }
+    }
     val reportsFolderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
@@ -309,17 +321,7 @@ fun GalvyxApp(context: Context) {
                         onEditNote = { note -> editingItemId = note.id; dialog = DialogKind.EditNote },
                         onEditDevice = { device -> editingItemId = device.id; dialog = DialogKind.EditDevice },
                         onEditExpense = { expense -> editingItemId = expense.id; dialog = DialogKind.EditExpense },
-                        onScanExpenseReceipt = { expense ->
-                            val created = createPhotoUri(context, profile, prefix = "receipt")
-                            if (created == null) {
-                                Toast.makeText(context, "Could not create receipt image", Toast.LENGTH_LONG).show()
-                            } else {
-                                pendingPhotoPath = created.first
-                                pendingPhotoUri = created.second
-                                pendingExpenseReceiptId = expense.id
-                                takePictureLauncher.launch(created.second)
-                            }
-                        },
+                        onScanExpenseReceipt = { expense -> launchExpenseReceiptScan(expense.id) },
                         onEditPhoto = { photo -> editingItemId = photo.id; dialog = DialogKind.EditPhoto },
                         onDeleteNote = { note -> deleteRequest = DeleteRequest(DeleteKind.Note, note.id, note.title.ifBlank { note.category }) },
                         onDeleteDevice = { device -> deleteRequest = DeleteRequest(DeleteKind.Device, device.id, device.hostname.ifBlank { device.deviceType }) },
@@ -380,13 +382,24 @@ fun GalvyxApp(context: Context) {
             }
             DialogKind.Expense -> ExpenseDialog(
                 onDismiss = { dialog = DialogKind.None },
-                onSave = { expense -> upsertVisit(visit.copy(expenses = visit.expenses + expense)); dialog = DialogKind.None }
+                onSave = { expense -> upsertVisit(visit.copy(expenses = visit.expenses + expense)); dialog = DialogKind.None },
+                onSaveAndScanReceipt = { expense ->
+                    upsertVisit(visit.copy(expenses = visit.expenses + expense))
+                    dialog = DialogKind.None
+                    launchExpenseReceiptScan(expense.id)
+                }
             )
             DialogKind.EditExpense -> visit.expenses.firstOrNull { it.id == editingItemId }?.let { existing ->
                 ExpenseDialog(
                     existing = existing,
                     onDismiss = { editingItemId = null; dialog = DialogKind.None },
-                    onSave = { expense -> upsertVisit(visit.copy(expenses = visit.expenses.map { if (it.id == expense.id) expense else it })); editingItemId = null; dialog = DialogKind.None }
+                    onSave = { expense -> upsertVisit(visit.copy(expenses = visit.expenses.map { if (it.id == expense.id) expense else it })); editingItemId = null; dialog = DialogKind.None },
+                    onSaveAndScanReceipt = { expense ->
+                        upsertVisit(visit.copy(expenses = visit.expenses.map { if (it.id == expense.id) expense else it }))
+                        editingItemId = null
+                        dialog = DialogKind.None
+                        launchExpenseReceiptScan(expense.id)
+                    }
                 )
             }
             DialogKind.EditPhoto -> visit.photos.firstOrNull { it.id == editingItemId }?.let { existing ->
@@ -972,20 +985,34 @@ fun DeviceDialog(existing: DeviceInfo? = null, onDismiss: () -> Unit, onSave: (D
 }
 
 @Composable
-fun ExpenseDialog(existing: VisitExpense? = null, onDismiss: () -> Unit, onSave: (VisitExpense) -> Unit) {
+fun ExpenseDialog(existing: VisitExpense? = null, onDismiss: () -> Unit, onSave: (VisitExpense) -> Unit, onSaveAndScanReceipt: ((VisitExpense) -> Unit)? = null) {
     var date by rememberSaveable(existing?.id) { mutableStateOf(existing?.date ?: todayString()) }
     var category by rememberSaveable(existing?.id) { mutableStateOf(existing?.category ?: "Other") }
     var vendor by rememberSaveable(existing?.id) { mutableStateOf(existing?.vendor.orEmpty()) }
     var amount by rememberSaveable(existing?.id) { mutableStateOf(existing?.amount.orEmpty()) }
     var payment by rememberSaveable(existing?.id) { mutableStateOf(existing?.paymentMethod ?: "Reimbursable") }
     var notes by rememberSaveable(existing?.id) { mutableStateOf(existing?.notes.orEmpty()) }
-    FormDialog(if (existing == null) "Add Expense" else "Edit Expense", onDismiss, onSave = { onSave((existing ?: VisitExpense()).copy(date = date.trim(), category = category.trim(), vendor = vendor.trim(), amount = amount.trim(), paymentMethod = payment.trim(), notes = notes.trim())) }) {
+    fun currentExpense(): VisitExpense = (existing ?: VisitExpense()).copy(
+        date = date.trim(),
+        category = category.trim(),
+        vendor = vendor.trim(),
+        amount = amount.trim(),
+        paymentMethod = payment.trim(),
+        notes = notes.trim()
+    )
+    FormDialog(if (existing == null) "Add Expense" else "Edit Expense", onDismiss, onSave = { onSave(currentExpense()) }) {
         FormTextField("Date", date) { date = it }
         SimpleDropdown("Category", category, EXPENSE_CATEGORIES) { category = it }
         FormTextField("Vendor / Merchant", vendor) { vendor = it }
         FormTextField("Amount", amount, keyboardType = KeyboardType.Decimal) { amount = it }
         SimpleDropdown("Payment Method", payment, PAYMENT_METHODS) { payment = it }
         FormTextField("Notes", notes, minLines = 3) { notes = it }
+        if (onSaveAndScanReceipt != null) {
+            OutlinedButton(onClick = { onSaveAndScanReceipt(currentExpense()) }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (existing == null) "Save & Scan Receipt" else "Save & Scan Another Receipt")
+            }
+            HintText("Use this from the expense form when you are entering mileage, meal, parts, or other advanced expense details.")
+        }
     }
 }
 
