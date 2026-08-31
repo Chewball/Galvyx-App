@@ -172,6 +172,24 @@ data class VisitExpense(
     }
 }
 
+data class ExpenseGroupTotal(
+    val label: String,
+    val count: Int,
+    val total: Double
+)
+
+data class ExpenseBreakdown(
+    val total: Double,
+    val reimbursableTotal: Double,
+    val companyPaidTotal: Double,
+    val receiptAttachedTotal: Double,
+    val missingReceiptTotal: Double,
+    val receiptScanCount: Int,
+    val missingReceiptCount: Int,
+    val byCategory: List<ExpenseGroupTotal>,
+    val byPaymentMethod: List<ExpenseGroupTotal>
+)
+
 data class VisitPhoto(
     val id: String = UUID.randomUUID().toString(),
     val path: String,
@@ -216,6 +234,27 @@ data class SiteVisit(
         get() = listOf(clientName, projectName).filter { it.isNotBlank() }.joinToString(" • ").ifBlank { "Untitled Visit" }
 
     fun summary(): String = "${notes.size} notes • ${devices.size} devices • ${expenses.size} expenses • ${photos.size} photos"
+
+    val expenseBreakdown: ExpenseBreakdown
+        get() {
+            val totals = expenses.map { it to it.amount.moneyValueOrZero() }
+            fun grouped(selector: (VisitExpense) -> String): List<ExpenseGroupTotal> = totals
+                .groupBy { (expense, _) -> selector(expense).ifBlank { "Other" } }
+                .map { (label, rows) -> ExpenseGroupTotal(label = label, count = rows.size, total = rows.sumOf { it.second }) }
+                .sortedWith(compareByDescending<ExpenseGroupTotal> { it.total }.thenBy { it.label })
+
+            return ExpenseBreakdown(
+                total = totals.sumOf { it.second },
+                reimbursableTotal = totals.filter { it.first.paymentMethod.equals("Reimbursable", ignoreCase = true) }.sumOf { it.second },
+                companyPaidTotal = totals.filterNot { it.first.paymentMethod.equals("Reimbursable", ignoreCase = true) }.sumOf { it.second },
+                receiptAttachedTotal = totals.filter { it.first.receiptPhotoPaths.isNotEmpty() }.sumOf { it.second },
+                missingReceiptTotal = totals.filter { it.first.receiptPhotoPaths.isEmpty() }.sumOf { it.second },
+                receiptScanCount = expenses.sumOf { it.receiptPhotoPaths.size },
+                missingReceiptCount = expenses.count { it.receiptPhotoPaths.isEmpty() },
+                byCategory = grouped { it.category },
+                byPaymentMethod = grouped { it.paymentMethod }
+            )
+        }
 
     fun matchesSearch(query: String): Boolean {
         val normalized = query.trim().lowercase()
@@ -309,6 +348,8 @@ private fun <T> JSONArray?.toList(transform: (JSONObject) -> T): List<T> {
         }
     }
 }
+
+private fun String.moneyValueOrZero(): Double = replace("$", "").replace(",", "").trim().toDoubleOrNull() ?: 0.0
 
 private fun JSONArray?.toStringList(): List<String> {
     if (this == null) return emptyList()

@@ -743,7 +743,7 @@ fun VisitDetailScreen(
     onDeletePhoto: (VisitPhoto) -> Unit,
     onExport: () -> Unit
 ) {
-    val expenseTotal = visit.expenses.sumOf { it.amount.toMoneyOrZero() }
+    val expenseBreakdown = visit.expenseBreakdown
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             CardPanel {
@@ -760,7 +760,7 @@ fun VisitDetailScreen(
                     photos = visit.photos.size,
                     devices = visit.devices.size,
                     expenses = visit.expenses.size,
-                    expenseTotal = expenseTotal
+                    expenseTotal = expenseBreakdown.total
                 )
                 HorizontalDivider(color = DividerDefaults.color.copy(alpha = 0.25f))
                 TwoColumnActions(
@@ -773,6 +773,7 @@ fun VisitDetailScreen(
                 PrimaryAction("Export / Share PDF Report", onClick = onExport)
             }
         }
+        if (visit.expenses.isNotEmpty()) item { ExpenseBreakdownCard(expenseBreakdown) }
         item { SectionHeader("Notes", visit.notes.size) }
         if (visit.notes.isEmpty()) item { SmallEmpty("No notes yet") }
         items(visit.notes, key = { it.id }) { note ->
@@ -1318,6 +1319,56 @@ fun DetailCard(title: String, subtitle: String, body: String, onEdit: (() -> Uni
 }
 
 @Composable
+fun ExpenseBreakdownCard(breakdown: ExpenseBreakdown) {
+    CardPanel {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Expense Breakdown", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Updates as receipts and expense amounts are added.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            }
+            NeonPill(breakdown.total.toCurrencyString(), GalvyxAlienGreen)
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BreakdownMiniTile("Reimbursable", breakdown.reimbursableTotal.toCurrencyString(), GalvyxCyan, Modifier.weight(1f))
+            BreakdownMiniTile("Company Paid", breakdown.companyPaidTotal.toCurrencyString(), GalvyxVioletBright, Modifier.weight(1f))
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BreakdownMiniTile("With Receipts", breakdown.receiptAttachedTotal.toCurrencyString(), GalvyxAlienGreen, Modifier.weight(1f))
+            BreakdownMiniTile("Missing Receipts", breakdown.missingReceiptTotal.toCurrencyString(), MaterialTheme.colorScheme.error, Modifier.weight(1f))
+        }
+        Text("${breakdown.receiptScanCount} receipt scan(s) attached • ${breakdown.missingReceiptCount} expense(s) missing receipts", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+        if (breakdown.byCategory.isNotEmpty()) {
+            HorizontalDivider(color = DividerDefaults.color.copy(alpha = 0.25f))
+            Text("By Category", fontWeight = FontWeight.SemiBold)
+            breakdown.byCategory.forEach { total -> BreakdownLine(total) }
+        }
+        if (breakdown.byPaymentMethod.isNotEmpty()) {
+            HorizontalDivider(color = DividerDefaults.color.copy(alpha = 0.25f))
+            Text("By Payment", fontWeight = FontWeight.SemiBold)
+            breakdown.byPaymentMethod.forEach { total -> BreakdownLine(total) }
+        }
+    }
+}
+
+@Composable
+fun BreakdownMiniTile(label: String, value: String, accent: Color, modifier: Modifier = Modifier) {
+    Surface(modifier = modifier, shape = RoundedCornerShape(16.dp), color = accent.copy(alpha = 0.10f), border = BorderStroke(1.dp, accent.copy(alpha = 0.28f))) {
+        Column(modifier = Modifier.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(value, color = accent, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, maxLines = 1)
+            Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+fun BreakdownLine(total: ExpenseGroupTotal) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text("${total.label} (${total.count})", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Text(total.total.toCurrencyString(), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    }
+}
+
+@Composable
 fun ExpenseDetailCard(expense: VisitExpense, onScanReceipt: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
     CardPanel {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
@@ -1575,6 +1626,18 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
 
     section("Expenses")
     if (visit.expenses.isEmpty()) line("No expenses captured.")
+    if (visit.expenses.isNotEmpty()) {
+        val breakdown = visit.expenseBreakdown
+        line("Expense Total: ${breakdown.total.toCurrencyString()}", headerPaint, 22f)
+        line("Reimbursable: ${breakdown.reimbursableTotal.toCurrencyString()} • Company Paid: ${breakdown.companyPaidTotal.toCurrencyString()}")
+        line("With Receipts: ${breakdown.receiptAttachedTotal.toCurrencyString()} • Missing Receipts: ${breakdown.missingReceiptTotal.toCurrencyString()}")
+        line("Receipt Scans: ${breakdown.receiptScanCount} • Expenses Missing Receipts: ${breakdown.missingReceiptCount}")
+        line("By Category", headerPaint, 20f)
+        breakdown.byCategory.forEach { line("${it.label}: ${it.total.toCurrencyString()} (${it.count})") }
+        line("By Payment", headerPaint, 20f)
+        breakdown.byPaymentMethod.forEach { line("${it.label}: ${it.total.toCurrencyString()} (${it.count})") }
+        y += 4f
+    }
     visit.expenses.forEachIndexed { index, expense ->
         line("${index + 1}. ${expense.vendor} ${expense.amount}".trim(), bodyPaint.apply { isFakeBoldText = true })
         bodyPaint.isFakeBoldText = false
@@ -1597,8 +1660,6 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
         }
         y += 5f
     }
-    if (visit.expenses.isNotEmpty()) line("Expense Total: ${visit.expenses.sumOf { it.amount.toMoneyOrZero() }.toCurrencyString()}", headerPaint, 22f)
-
     section("Photos")
     if (visit.photos.isEmpty()) line("No photos captured.")
     visit.photos

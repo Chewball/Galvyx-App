@@ -83,6 +83,30 @@ class GalvyxModelsTest {
 
 
     @Test
+    fun expenseBreakdownCalculatesTotalsByCategoryPaymentAndReceiptStatus() {
+        val visit = SiteVisit(
+            expenses = listOf(
+                VisitExpense(category = "Fuel", vendor = "Shell", amount = "\$45.25", paymentMethod = "Reimbursable", receiptPhotoPaths = listOf("/receipt/fuel.jpg")),
+                VisitExpense(category = "Meal", vendor = "Cafe", amount = "18.50", paymentMethod = "Company Card"),
+                VisitExpense(category = "Fuel", vendor = "Chevron", amount = "12.25", paymentMethod = "Reimbursable", receiptPhotoPaths = listOf("/receipt/fuel2a.jpg", "/receipt/fuel2b.jpg"))
+            )
+        )
+
+        val breakdown = visit.expenseBreakdown
+
+        assertEquals(76.0, breakdown.total, 0.001)
+        assertEquals(57.5, breakdown.reimbursableTotal, 0.001)
+        assertEquals(18.5, breakdown.companyPaidTotal, 0.001)
+        assertEquals(57.5, breakdown.receiptAttachedTotal, 0.001)
+        assertEquals(18.5, breakdown.missingReceiptTotal, 0.001)
+        assertEquals(3, breakdown.receiptScanCount)
+        assertEquals(1, breakdown.missingReceiptCount)
+        assertEquals("Fuel", breakdown.byCategory.first().label)
+        assertEquals(57.5, breakdown.byCategory.first().total, 0.001)
+        assertEquals("Reimbursable", breakdown.byPaymentMethod.first().label)
+    }
+
+    @Test
     fun companyProfileJsonRoundTripPreservesStorageSettings() {
         val profile = CompanyProfile(
             companyName = "Acme Field Services",
