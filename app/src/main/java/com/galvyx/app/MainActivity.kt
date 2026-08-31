@@ -1644,16 +1644,21 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
         line("${expense.date} • ${expense.category} • ${expense.paymentMethod} • ${expense.receiptCountLabel}")
         wrapped(expense.notes)
         expense.receiptPhotoPaths.forEachIndexed { receiptIndex, receiptPath ->
-            line("Receipt scan ${receiptIndex + 1}")
+            line("Receipt scan ${receiptIndex + 1} - full size for reimbursement review")
             val receiptBitmap = loadBitmap(context, receiptPath)
             if (receiptBitmap != null) {
-                if (y > 610f) newPage()
-                val maxWidth = 220f
-                val scale = maxWidth / receiptBitmap.width
-                val width = maxWidth
+                if (y > 250f) newPage()
+                val maxWidth = 528f
+                val maxHeight = 620f
+                val widthScale = maxWidth / receiptBitmap.width.toFloat()
+                val heightScale = maxHeight / receiptBitmap.height.toFloat()
+                val scale = minOf(widthScale, heightScale)
+                val width = receiptBitmap.width * scale
                 val height = receiptBitmap.height * scale
-                canvas.drawBitmap(receiptBitmap, null, android.graphics.RectF(42f, y, 42f + width, y + height.coerceAtMost(150f)), null)
-                y += height.coerceAtMost(150f) + 12f
+                val left = 42f + ((maxWidth - width) / 2f)
+                canvas.drawBitmap(receiptBitmap, null, android.graphics.RectF(left, y, left + width, y + height), null)
+                y += height + 18f
+                if (y > 680f) newPage()
             } else {
                 line(receiptPath)
             }
