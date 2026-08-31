@@ -27,7 +27,7 @@ class GalvyxModelsTest {
                 jobType = "Network Survey",
                 notes = listOf(VisitNote(location = "MDF", category = "Switch / Firewall", title = "Firewall", notes = "FCC listener checked")),
                 devices = listOf(DeviceInfo(location = "MDF", deviceType = "Firewall", manufacturer = "SonicWall", ipAddress = "10.0.31.31")),
-                expenses = listOf(VisitExpense(date = "2026-08-21", category = "Meal", vendor = "Cafe", amount = "18.50")),
+                expenses = listOf(VisitExpense(date = "2026-08-21", category = "Meal", vendor = "Cafe", amount = "18.50", receiptPhotoPaths = listOf("/storage/receipt-1.jpg", "content://receipt-2"))),
                 photos = listOf(VisitPhoto(path = "/storage/photo.jpg", caption = "MDF rack", category = "MDF", stage = "Before"))
             )
         )
@@ -41,6 +41,8 @@ class GalvyxModelsTest {
         assertEquals("Firewall", restored.first().notes.first().title)
         assertEquals("10.0.31.31", restored.first().devices.first().ipAddress)
         assertEquals("18.50", restored.first().expenses.first().amount)
+        assertEquals(listOf("/storage/receipt-1.jpg", "content://receipt-2"), restored.first().expenses.first().receiptPhotoPaths)
+        assertEquals("2 receipt scans", restored.first().expenses.first().receiptCountLabel)
         assertEquals("MDF rack", restored.first().photos.first().caption)
         assertEquals("MDF", restored.first().photos.first().category)
         assertEquals("Before", restored.first().photos.first().stage)

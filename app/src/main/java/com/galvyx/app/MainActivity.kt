@@ -148,6 +148,7 @@ fun GalvyxApp(context: Context) {
     var deleteRequest by remember { mutableStateOf<DeleteRequest?>(null) }
     var pendingPhotoPath by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingExpenseReceiptId by rememberSaveable { mutableStateOf<String?>(null) }
 
     fun persistVisits() {
         prefs.edit().putString(PREF_VISITS, visitsToJson(visits)).apply()
@@ -174,11 +175,28 @@ fun GalvyxApp(context: Context) {
     }
 
     val takePictureLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        if (success && pendingPhotoPath != null) {
+        val capturedPath = pendingPhotoPath
+        val receiptExpenseId = pendingExpenseReceiptId
+        if (success && capturedPath != null && receiptExpenseId != null) {
+            selectedVisit()?.let { current ->
+                upsertVisit(
+                    current.copy(
+                        expenses = current.expenses.map { expense ->
+                            if (expense.id == receiptExpenseId) expense.copy(receiptPhotoPaths = expense.receiptPhotoPaths + capturedPath) else expense
+                        }
+                    )
+                )
+            }
+            pendingPhotoPath = null
+            pendingPhotoUri = null
+            pendingExpenseReceiptId = null
+            Toast.makeText(context, "Receipt scan attached", Toast.LENGTH_SHORT).show()
+        } else if (success && capturedPath != null) {
             dialog = DialogKind.PhotoCaption
         } else {
             pendingPhotoPath = null
             pendingPhotoUri = null
+            pendingExpenseReceiptId = null
         }
     }
     val reportsFolderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -291,6 +309,17 @@ fun GalvyxApp(context: Context) {
                         onEditNote = { note -> editingItemId = note.id; dialog = DialogKind.EditNote },
                         onEditDevice = { device -> editingItemId = device.id; dialog = DialogKind.EditDevice },
                         onEditExpense = { expense -> editingItemId = expense.id; dialog = DialogKind.EditExpense },
+                        onScanExpenseReceipt = { expense ->
+                            val created = createPhotoUri(context, profile, prefix = "receipt")
+                            if (created == null) {
+                                Toast.makeText(context, "Could not create receipt image", Toast.LENGTH_LONG).show()
+                            } else {
+                                pendingPhotoPath = created.first
+                                pendingPhotoUri = created.second
+                                pendingExpenseReceiptId = expense.id
+                                takePictureLauncher.launch(created.second)
+                            }
+                        },
                         onEditPhoto = { photo -> editingItemId = photo.id; dialog = DialogKind.EditPhoto },
                         onDeleteNote = { note -> deleteRequest = DeleteRequest(DeleteKind.Note, note.id, note.title.ifBlank { note.category }) },
                         onDeleteDevice = { device -> deleteRequest = DeleteRequest(DeleteKind.Device, device.id, device.hostname.ifBlank { device.deviceType }) },
@@ -393,7 +422,10 @@ fun GalvyxApp(context: Context) {
                     }
                     DeleteKind.Note -> selectedVisit()?.let { current -> upsertVisit(current.copy(notes = current.notes.filterNot { it.id == request.id })) }
                     DeleteKind.Device -> selectedVisit()?.let { current -> upsertVisit(current.copy(devices = current.devices.filterNot { it.id == request.id })) }
-                    DeleteKind.Expense -> selectedVisit()?.let { current -> upsertVisit(current.copy(expenses = current.expenses.filterNot { it.id == request.id })) }
+                    DeleteKind.Expense -> selectedVisit()?.let { current ->
+                        current.expenses.firstOrNull { it.id == request.id }?.receiptPhotoPaths?.forEach { deleteAppOwnedPhoto(context, it, profile) }
+                        upsertVisit(current.copy(expenses = current.expenses.filterNot { it.id == request.id }))
+                    }
                     DeleteKind.Photo -> selectedVisit()?.let { current ->
                         current.photos.firstOrNull { it.id == request.id }?.let { deleteAppOwnedPhoto(context, it.path, profile) }
                         upsertVisit(current.copy(photos = current.photos.filterNot { it.id == request.id }))
@@ -690,6 +722,7 @@ fun VisitDetailScreen(
     onEditNote: (VisitNote) -> Unit,
     onEditDevice: (DeviceInfo) -> Unit,
     onEditExpense: (VisitExpense) -> Unit,
+    onScanExpenseReceipt: (VisitExpense) -> Unit,
     onEditPhoto: (VisitPhoto) -> Unit,
     onDeleteNote: (VisitNote) -> Unit,
     onDeleteDevice: (DeviceInfo) -> Unit,
@@ -740,7 +773,12 @@ fun VisitDetailScreen(
         item { SectionHeader("Expenses", visit.expenses.size) }
         if (visit.expenses.isEmpty()) item { SmallEmpty("No expenses yet") }
         items(visit.expenses, key = { it.id }) { expense ->
-            DetailCard("${expense.vendor} ${expense.amount}".trim(), "${expense.date} • ${expense.category} • ${expense.paymentMethod}", expense.notes, onEdit = { onEditExpense(expense) }, onDelete = { onDeleteExpense(expense) })
+            ExpenseDetailCard(
+                expense = expense,
+                onScanReceipt = { onScanExpenseReceipt(expense) },
+                onEdit = { onEditExpense(expense) },
+                onDelete = { onDeleteExpense(expense) }
+            )
         }
         item { SectionHeader("Photos", visit.photos.size) }
         if (visit.photos.isEmpty()) item { SmallEmpty("No photos yet") }
@@ -1253,6 +1291,49 @@ fun DetailCard(title: String, subtitle: String, body: String, onEdit: (() -> Uni
 }
 
 @Composable
+fun ExpenseDetailCard(expense: VisitExpense, onScanReceipt: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
+    CardPanel {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("${expense.vendor} ${expense.amount}".trim().ifBlank { expense.category }, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                Text("${expense.date} • ${expense.category} • ${expense.paymentMethod}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                Text(expense.receiptCountLabel, color = GalvyxCyan, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = onEdit) { Text("Edit") }
+                TextButton(onClick = onDelete) { Text("Delete") }
+            }
+        }
+        if (expense.notes.isNotBlank()) Text(expense.notes, color = MaterialTheme.colorScheme.onSurface)
+        OutlinedButton(onClick = onScanReceipt, modifier = Modifier.fillMaxWidth()) { Text("Scan / Add Receipt Photo") }
+        if (expense.receiptPhotoPaths.isNotEmpty()) {
+            val context = LocalContext.current
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                expense.receiptPhotoPaths.take(3).forEachIndexed { index, path ->
+                    val bitmap = remember(path) { loadBitmap(context, path) }
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = "Receipt scan ${index + 1}",
+                            modifier = Modifier.weight(1f).height(92.dp),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Surface(modifier = Modifier.weight(1f).height(92.dp), shape = RoundedCornerShape(12.dp), color = GalvyxCardElevated) {
+                            Box(contentAlignment = Alignment.Center) { Text("Receipt ${index + 1}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
+                    }
+                }
+                if (expense.receiptPhotoPaths.size < 3) repeat(3 - expense.receiptPhotoPaths.size) { Spacer(Modifier.weight(1f)) }
+            }
+            if (expense.receiptPhotoPaths.size > 3) HintText("+${expense.receiptPhotoPaths.size - 3} more receipt scan(s) saved")
+        } else {
+            HintText("Tip: use Scan / Add Receipt Photo after entering the expense. Hold the receipt flat with good light for a clean scan-style image.")
+        }
+    }
+}
+
+@Composable
 fun PhotoDetailCard(photo: VisitPhoto, onEdit: () -> Unit, onDelete: () -> Unit) {
     CardPanel {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
@@ -1361,15 +1442,17 @@ private fun deleteAppOwnedPhoto(context: Context, photoPath: String, profile: Co
     isAppOwned && target.delete()
 }.getOrDefault(false)
 
-private fun createPhotoUri(context: Context, profile: CompanyProfile): Pair<String, Uri>? = runCatching {
+private fun createPhotoUri(context: Context, profile: CompanyProfile, prefix: String = "galvyx"): Pair<String, Uri>? = runCatching {
+    val safePrefix = safeFolderSegment(prefix).ifBlank { "galvyx" }.lowercase(Locale.US)
+    val fileName = "${safePrefix}_${System.currentTimeMillis()}.jpg"
     if (profile.localPhotosTreeUri.isNotBlank()) {
         val tree = DocumentFile.fromTreeUri(context, Uri.parse(profile.localPhotosTreeUri)) ?: return@runCatching null
-        val file = tree.createFile("image/jpeg", "galvyx_${System.currentTimeMillis()}.jpg") ?: return@runCatching null
+        val file = tree.createFile("image/jpeg", fileName) ?: return@runCatching null
         return@runCatching file.uri.toString() to file.uri
     }
     val dir = appStorageDir(context, Environment.DIRECTORY_PICTURES, profile.localRootFolder, profile.localPhotosFolder)
     dir.mkdirs()
-    val file = File(dir, "galvyx_${System.currentTimeMillis()}.jpg")
+    val file = File(dir, fileName)
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     file.absolutePath to uri
 }.getOrNull()
@@ -1468,8 +1551,23 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     visit.expenses.forEachIndexed { index, expense ->
         line("${index + 1}. ${expense.vendor} ${expense.amount}".trim(), bodyPaint.apply { isFakeBoldText = true })
         bodyPaint.isFakeBoldText = false
-        line("${expense.date} • ${expense.category} • ${expense.paymentMethod}")
+        line("${expense.date} • ${expense.category} • ${expense.paymentMethod} • ${expense.receiptCountLabel}")
         wrapped(expense.notes)
+        expense.receiptPhotoPaths.forEachIndexed { receiptIndex, receiptPath ->
+            line("Receipt scan ${receiptIndex + 1}")
+            val receiptBitmap = loadBitmap(context, receiptPath)
+            if (receiptBitmap != null) {
+                if (y > 610f) newPage()
+                val maxWidth = 220f
+                val scale = maxWidth / receiptBitmap.width
+                val width = maxWidth
+                val height = receiptBitmap.height * scale
+                canvas.drawBitmap(receiptBitmap, null, android.graphics.RectF(42f, y, 42f + width, y + height.coerceAtMost(150f)), null)
+                y += height.coerceAtMost(150f) + 12f
+            } else {
+                line(receiptPath)
+            }
+        }
         y += 5f
     }
     if (visit.expenses.isNotEmpty()) line("Expense Total: ${visit.expenses.sumOf { it.amount.toMoneyOrZero() }.toCurrencyString()}", headerPaint, 22f)

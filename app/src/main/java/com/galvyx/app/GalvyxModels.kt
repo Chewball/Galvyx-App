@@ -138,8 +138,16 @@ data class VisitExpense(
     val vendor: String = "",
     val amount: String = "",
     val paymentMethod: String = "Reimbursable",
-    val notes: String = ""
+    val notes: String = "",
+    val receiptPhotoPaths: List<String> = emptyList()
 ) {
+    val receiptCountLabel: String
+        get() = when (receiptPhotoPaths.size) {
+            0 -> "No receipts"
+            1 -> "1 receipt scan"
+            else -> "${receiptPhotoPaths.size} receipt scans"
+        }
+
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
         .put("date", date)
@@ -148,6 +156,7 @@ data class VisitExpense(
         .put("amount", amount)
         .put("paymentMethod", paymentMethod)
         .put("notes", notes)
+        .put("receiptPhotoPaths", JSONArray().also { array -> receiptPhotoPaths.forEach { array.put(it) } })
 
     companion object {
         fun fromJson(json: JSONObject): VisitExpense = VisitExpense(
@@ -157,7 +166,8 @@ data class VisitExpense(
             vendor = json.optString("vendor"),
             amount = json.optString("amount"),
             paymentMethod = json.optString("paymentMethod", "Reimbursable"),
-            notes = json.optString("notes")
+            notes = json.optString("notes"),
+            receiptPhotoPaths = json.optJSONArray("receiptPhotoPaths").toStringList()
         )
     }
 }
@@ -218,7 +228,7 @@ data class SiteVisit(
             jobType,
             notes.joinToString(" ") { listOf(it.location, it.category, it.title, it.notes).joinToString(" ") },
             devices.joinToString(" ") { listOf(it.location, it.deviceType, it.manufacturer, it.model, it.serialNumber, it.macAddress, it.ipAddress, it.hostname, it.notes).joinToString(" ") },
-            expenses.joinToString(" ") { listOf(it.date, it.category, it.vendor, it.amount, it.paymentMethod, it.notes).joinToString(" ") },
+            expenses.joinToString(" ") { listOf(it.date, it.category, it.vendor, it.amount, it.paymentMethod, it.notes, it.receiptCountLabel).joinToString(" ") },
             photos.joinToString(" ") { listOf(it.category, it.stage, it.caption).joinToString(" ") }
         ).joinToString(" ").lowercase().contains(normalized)
     }
@@ -296,6 +306,15 @@ private fun <T> JSONArray?.toList(transform: (JSONObject) -> T): List<T> {
     return buildList {
         for (index in 0 until length()) {
             optJSONObject(index)?.let { add(transform(it)) }
+        }
+    }
+}
+
+private fun JSONArray?.toStringList(): List<String> {
+    if (this == null) return emptyList()
+    return buildList {
+        for (index in 0 until length()) {
+            optString(index).takeIf { it.isNotBlank() }?.let { add(it) }
         }
     }
 }
