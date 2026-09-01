@@ -45,6 +45,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -127,11 +128,18 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Screen { Home, NewVisit, Recent, VisitDetail, Settings }
-private enum class DialogKind { None, Note, Device, Expense, PhotoCaption, EditVisit, EditNote, EditDevice, EditExpense, EditPhoto }
+private enum class DialogKind { None, Note, Device, Expense, PhotoCaption, EditVisit, EditNote, EditDevice, EditExpense, EditPhoto, ExportOptions }
 private enum class DeleteKind { Visit, Note, Device, Expense, Photo }
 private data class DeleteRequest(val kind: DeleteKind, val id: String, val title: String)
 private data class ExportedReport(val uri: Uri, val displayName: String)
 private data class ReportTarget(val uri: Uri, val displayName: String, val outputStream: OutputStream)
+data class PdfExportOptions(
+    val includeNotes: Boolean = true,
+    val includeDevices: Boolean = true,
+    val includeExpenses: Boolean = true,
+    val includeExpenseReceipts: Boolean = true,
+    val includePhotos: Boolean = true
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -377,10 +385,7 @@ fun GalvyxApp(context: Context) {
                         onDeleteDevice = { device -> deleteRequest = DeleteRequest(DeleteKind.Device, device.id, device.hostname.ifBlank { device.deviceType }) },
                         onDeleteExpense = { expense -> deleteRequest = DeleteRequest(DeleteKind.Expense, expense.id, expense.vendor.ifBlank { expense.category }) },
                         onDeletePhoto = { photo -> deleteRequest = DeleteRequest(DeleteKind.Photo, photo.id, photo.caption.ifBlank { "Photo" }) },
-                        onExport = {
-                            val report = exportVisitPdf(context, visit, profile)
-                            if (report != null) shareReport(context, report) else Toast.makeText(context, "PDF export failed", Toast.LENGTH_LONG).show()
-                        }
+                        onExport = { dialog = DialogKind.ExportOptions }
                     )
                 } ?: EmptyState("Visit not found", "Go back and choose a recent site visit.")
                 Screen.Settings -> SettingsScreen(
@@ -480,6 +485,15 @@ fun GalvyxApp(context: Context) {
                     pendingPhotoPath = null
                     pendingPhotoUri = null
                     dialog = DialogKind.None
+                }
+            )
+            DialogKind.ExportOptions -> PdfExportOptionsDialog(
+                visit = visit,
+                onDismiss = { dialog = DialogKind.None },
+                onExport = { options ->
+                    val report = exportVisitPdf(context, visit, profile, options)
+                    dialog = DialogKind.None
+                    if (report != null) shareReport(context, report) else Toast.makeText(context, "PDF export failed", Toast.LENGTH_LONG).show()
                 }
             )
             DialogKind.None -> Unit
@@ -1045,6 +1059,63 @@ fun DeviceDialog(existing: DeviceInfo? = null, onDismiss: () -> Unit, onSave: (D
         FormTextField("IP Address", ip) { ip = it }
         FormTextField("Hostname", hostname) { hostname = it }
         FormTextField("Notes", notes, minLines = 3) { notes = it }
+    }
+}
+
+@Composable
+fun PdfExportOptionsDialog(visit: SiteVisit, onDismiss: () -> Unit, onExport: (PdfExportOptions) -> Unit) {
+    var includeNotes by rememberSaveable { mutableStateOf(true) }
+    var includeDevices by rememberSaveable { mutableStateOf(true) }
+    var includeExpenses by rememberSaveable { mutableStateOf(true) }
+    var includeExpenseReceipts by rememberSaveable { mutableStateOf(true) }
+    var includePhotos by rememberSaveable { mutableStateOf(true) }
+    val atLeastOneDetail = includeNotes || includeDevices || includeExpenses || includePhotos
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose PDF sections") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Export ${visit.title} with only the sections you need.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                ExportOptionRow("Notes", "${visit.notes.size} note(s)", includeNotes) { includeNotes = it }
+                ExportOptionRow("Devices", "${visit.devices.size} device(s)", includeDevices) { includeDevices = it }
+                ExportOptionRow("Expenses", "${visit.expenses.size} expense(s)", includeExpenses) { checked ->
+                    includeExpenses = checked
+                    if (!checked) includeExpenseReceipts = false
+                }
+                ExportOptionRow("Expense receipt images", "Receipt photos under matching expenses", includeExpenseReceipts, enabled = includeExpenses) { includeExpenseReceipts = it }
+                ExportOptionRow("General photos", "${visit.photos.size} photo(s)", includePhotos) { includePhotos = it }
+                if (!atLeastOneDetail) HintText("Visit Summary is always included. Select at least one detail section for a useful report.")
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onExport(
+                    PdfExportOptions(
+                        includeNotes = includeNotes,
+                        includeDevices = includeDevices,
+                        includeExpenses = includeExpenses,
+                        includeExpenseReceipts = includeExpenses && includeExpenseReceipts,
+                        includePhotos = includePhotos
+                    )
+                )
+            }) { Text("Create PDF") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
+@Composable
+fun ExportOptionRow(label: String, detail: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Checkbox(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, fontWeight = FontWeight.SemiBold, color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(detail, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
@@ -1681,7 +1752,7 @@ private fun saveReceiptScanFromUri(context: Context, profile: CompanyProfile, so
     }
 }.getOrNull()
 
-private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyProfile): ExportedReport? = runCatching {
+private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyProfile, options: PdfExportOptions = PdfExportOptions()): ExportedReport? = runCatching {
     val safeName = "Galvyx_${visit.clientName}_${visit.projectName}_${visit.date}_${System.currentTimeMillis()}".replace(Regex("[^A-Za-z0-9_-]+"), "_").trim('_').ifBlank { "Galvyx_Report" }
     val target = createReportTarget(context, profile, "$safeName.pdf") ?: return@runCatching null
 
@@ -1747,96 +1818,107 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     line("Job Type: ${visit.jobType}")
     line(visit.summary())
 
-    section("Notes")
-    if (visit.notes.isEmpty()) line("No notes captured.")
-    visit.notes.forEachIndexed { index, note ->
-        line("${index + 1}. ${note.title.ifBlank { note.category }}", bodyPaint.apply { isFakeBoldText = true })
-        bodyPaint.isFakeBoldText = false
-        line("Location: ${note.location} • Category: ${note.category}")
-        wrapped(note.notes)
-        y += 5f
-    }
-
-    section("Devices")
-    if (visit.devices.isEmpty()) line("No devices captured.")
-    visit.devices.forEachIndexed { index, device ->
-        line("${index + 1}. ${device.deviceType} ${device.hostname}".trim(), bodyPaint.apply { isFakeBoldText = true })
-        bodyPaint.isFakeBoldText = false
-        listOf(
-            "Location: ${device.location}",
-            "Manufacturer/Model: ${device.manufacturer} ${device.model}",
-            "Serial: ${device.serialNumber}",
-            "MAC: ${device.macAddress}",
-            "IP: ${device.ipAddress}",
-            "Notes: ${device.notes}"
-        ).forEach { if (!it.endsWith(": ")) line(it) }
-        y += 5f
-    }
-
-    section("Expenses")
-    if (visit.expenses.isEmpty()) line("No expenses captured.")
-    if (visit.expenses.isNotEmpty()) {
-        val breakdown = visit.expenseBreakdown
-        line("Expense Total: ${breakdown.total.toCurrencyString()}", headerPaint, 22f)
-        line("Reimbursable: ${breakdown.reimbursableTotal.toCurrencyString()} • Company Paid: ${breakdown.companyPaidTotal.toCurrencyString()}")
-        line("With Receipts: ${breakdown.receiptAttachedTotal.toCurrencyString()} • Missing Receipts: ${breakdown.missingReceiptTotal.toCurrencyString()}")
-        line("Receipt Scans: ${breakdown.receiptScanCount} • Expenses Missing Receipts: ${breakdown.missingReceiptCount}")
-        line("By Category", headerPaint, 20f)
-        breakdown.byCategory.forEach { line("${it.label}: ${it.total.toCurrencyString()} (${it.count})") }
-        line("By Payment", headerPaint, 20f)
-        breakdown.byPaymentMethod.forEach { line("${it.label}: ${it.total.toCurrencyString()} (${it.count})") }
-        y += 4f
-    }
-    visit.expenses.forEachIndexed { index, expense ->
-        line("${index + 1}. ${expense.vendor} ${expense.amount}".trim(), bodyPaint.apply { isFakeBoldText = true })
-        bodyPaint.isFakeBoldText = false
-        line("${expense.date} • ${expense.category} • ${expense.paymentMethod} • ${expense.receiptCountLabel}")
-        wrapped(expense.notes)
-        expense.receiptPhotoPaths.forEachIndexed { receiptIndex, receiptPath ->
-            line("Receipt scan ${receiptIndex + 1} - full size for reimbursement review")
-            val receiptBitmap = loadBitmap(context, receiptPath)
-            if (receiptBitmap != null) {
-                if (y > 250f) newPage()
-                val maxWidth = 528f
-                val maxHeight = 620f
-                val widthScale = maxWidth / receiptBitmap.width.toFloat()
-                val heightScale = maxHeight / receiptBitmap.height.toFloat()
-                val scale = minOf(widthScale, heightScale)
-                val width = receiptBitmap.width * scale
-                val height = receiptBitmap.height * scale
-                val left = 42f + ((maxWidth - width) / 2f)
-                canvas.drawBitmap(receiptBitmap, null, android.graphics.RectF(left, y, left + width, y + height), null)
-                y += height + 18f
-                if (y > 680f) newPage()
-            } else {
-                line(receiptPath)
-            }
+    if (options.includeNotes) {
+        section("Notes")
+        if (visit.notes.isEmpty()) line("No notes captured.")
+        visit.notes.forEachIndexed { index, note ->
+            line("${index + 1}. ${note.title.ifBlank { note.category }}", bodyPaint.apply { isFakeBoldText = true })
+            bodyPaint.isFakeBoldText = false
+            line("Location: ${note.location} • Category: ${note.category}")
+            wrapped(note.notes)
+            y += 5f
         }
-        y += 5f
     }
-    section("Photos")
-    if (visit.photos.isEmpty()) line("No photos captured.")
-    visit.photos
-        .groupBy { it.category.ifBlank { "General" } }
-        .forEach { (category, categoryPhotos) ->
-            line(category, headerPaint, 20f)
-            categoryPhotos.forEachIndexed { index, photo ->
-                val title = "${index + 1}. ${photo.stage.ifBlank { "Reference" }}${if (photo.caption.isNotBlank()) ": ${photo.caption}" else ""}"
-                line(title)
-                val bitmap = loadBitmap(context, photo.path)
-                if (bitmap != null) {
-                    if (y > 610f) newPage()
-                    val maxWidth = 220f
-                    val scale = maxWidth / bitmap.width
-                    val width = maxWidth
-                    val height = bitmap.height * scale
-                    canvas.drawBitmap(bitmap, null, android.graphics.RectF(42f, y, 42f + width, y + height.coerceAtMost(150f)), null)
-                    y += height.coerceAtMost(150f) + 12f
-                } else {
-                    line(photo.path)
+
+    if (options.includeDevices) {
+        section("Devices")
+        if (visit.devices.isEmpty()) line("No devices captured.")
+        visit.devices.forEachIndexed { index, device ->
+            line("${index + 1}. ${device.deviceType} ${device.hostname}".trim(), bodyPaint.apply { isFakeBoldText = true })
+            bodyPaint.isFakeBoldText = false
+            listOf(
+                "Location: ${device.location}",
+                "Manufacturer/Model: ${device.manufacturer} ${device.model}",
+                "Serial: ${device.serialNumber}",
+                "MAC: ${device.macAddress}",
+                "IP: ${device.ipAddress}",
+                "Notes: ${device.notes}"
+            ).forEach { if (!it.endsWith(": ")) line(it) }
+            y += 5f
+        }
+    }
+
+    if (options.includeExpenses) {
+        section("Expenses")
+        if (visit.expenses.isEmpty()) line("No expenses captured.")
+        if (visit.expenses.isNotEmpty()) {
+            val breakdown = visit.expenseBreakdown
+            line("Expense Total: ${breakdown.total.toCurrencyString()}", headerPaint, 22f)
+            line("Reimbursable: ${breakdown.reimbursableTotal.toCurrencyString()} • Company Paid: ${breakdown.companyPaidTotal.toCurrencyString()}")
+            line("With Receipts: ${breakdown.receiptAttachedTotal.toCurrencyString()} • Missing Receipts: ${breakdown.missingReceiptTotal.toCurrencyString()}")
+            line("Receipt Scans: ${breakdown.receiptScanCount} • Expenses Missing Receipts: ${breakdown.missingReceiptCount}")
+            line("By Category", headerPaint, 20f)
+            breakdown.byCategory.forEach { line("${it.label}: ${it.total.toCurrencyString()} (${it.count})") }
+            line("By Payment", headerPaint, 20f)
+            breakdown.byPaymentMethod.forEach { line("${it.label}: ${it.total.toCurrencyString()} (${it.count})") }
+            y += 4f
+        }
+        visit.expenses.forEachIndexed { index, expense ->
+            line("${index + 1}. ${expense.vendor} ${expense.amount}".trim(), bodyPaint.apply { isFakeBoldText = true })
+            bodyPaint.isFakeBoldText = false
+            line("${expense.date} • ${expense.category} • ${expense.paymentMethod} • ${expense.receiptCountLabel}")
+            wrapped(expense.notes)
+            if (options.includeExpenseReceipts) {
+                expense.receiptPhotoPaths.forEachIndexed { receiptIndex, receiptPath ->
+                    line("Receipt scan ${receiptIndex + 1} - full size for reimbursement review")
+                    val receiptBitmap = loadBitmap(context, receiptPath)
+                    if (receiptBitmap != null) {
+                        if (y > 250f) newPage()
+                        val maxWidth = 528f
+                        val maxHeight = 620f
+                        val widthScale = maxWidth / receiptBitmap.width.toFloat()
+                        val heightScale = maxHeight / receiptBitmap.height.toFloat()
+                        val scale = minOf(widthScale, heightScale)
+                        val width = receiptBitmap.width * scale
+                        val height = receiptBitmap.height * scale
+                        val left = 42f + ((maxWidth - width) / 2f)
+                        canvas.drawBitmap(receiptBitmap, null, android.graphics.RectF(left, y, left + width, y + height), null)
+                        y += height + 18f
+                        if (y > 680f) newPage()
+                    } else {
+                        line(receiptPath)
+                    }
                 }
             }
+            y += 5f
         }
+    }
+
+    if (options.includePhotos) {
+        section("Photos")
+        if (visit.photos.isEmpty()) line("No photos captured.")
+        visit.photos
+            .groupBy { it.category.ifBlank { "General" } }
+            .forEach { (category, categoryPhotos) ->
+                line(category, headerPaint, 20f)
+                categoryPhotos.forEachIndexed { index, photo ->
+                    val title = "${index + 1}. ${photo.stage.ifBlank { "Reference" }}${if (photo.caption.isNotBlank()) ": ${photo.caption}" else ""}"
+                    line(title)
+                    val bitmap = loadBitmap(context, photo.path)
+                    if (bitmap != null) {
+                        if (y > 610f) newPage()
+                        val maxWidth = 220f
+                        val scale = maxWidth / bitmap.width
+                        val width = maxWidth
+                        val height = bitmap.height * scale
+                        canvas.drawBitmap(bitmap, null, android.graphics.RectF(42f, y, 42f + width, y + height.coerceAtMost(150f)), null)
+                        y += height.coerceAtMost(150f) + 12f
+                    } else {
+                        line(photo.path)
+                    }
+                }
+            }
+    }
 
     footer()
     document.finishPage(page)

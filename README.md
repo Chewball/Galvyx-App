@@ -16,7 +16,7 @@ Use Galvyx to capture visit details, work notes, photos, device information, and
 - Filter recent visits by job type.
 - Confirm destructive deletes before removing records.
 - Store visit data locally on the device.
-- Generate and share PDF site visit reports.
+- Generate and share PDF site visit reports with selectable sections.
 - Set company/report profile details for exported reports.
 
 ## Privacy posture
