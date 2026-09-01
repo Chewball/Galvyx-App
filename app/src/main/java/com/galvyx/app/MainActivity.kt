@@ -449,6 +449,19 @@ fun GalvyxApp(context: Context) {
                         editingItemId = null
                         dialog = DialogKind.None
                         launchExpenseReceiptScan(expense.id)
+                    },
+                    onDeleteReceipt = { expenseId, receiptPath ->
+                        deleteAppOwnedPhoto(context, receiptPath, profile)
+                        selectedVisit()?.let { current ->
+                            upsertVisit(
+                                current.copy(
+                                    expenses = current.expenses.map { expense ->
+                                        if (expense.id == expenseId) expense.copy(receiptPhotoPaths = expense.receiptPhotoPaths.filterNot { it == receiptPath }) else expense
+                                    }
+                                )
+                            )
+                        }
+                        Toast.makeText(context, "Receipt removed", Toast.LENGTH_SHORT).show()
                     }
                 )
             }
@@ -1036,20 +1049,28 @@ fun DeviceDialog(existing: DeviceInfo? = null, onDismiss: () -> Unit, onSave: (D
 }
 
 @Composable
-fun ExpenseDialog(existing: VisitExpense? = null, onDismiss: () -> Unit, onSave: (VisitExpense) -> Unit, onSaveAndScanReceipt: ((VisitExpense) -> Unit)? = null) {
+fun ExpenseDialog(
+    existing: VisitExpense? = null,
+    onDismiss: () -> Unit,
+    onSave: (VisitExpense) -> Unit,
+    onSaveAndScanReceipt: ((VisitExpense) -> Unit)? = null,
+    onDeleteReceipt: ((String, String) -> Unit)? = null
+) {
     var date by rememberSaveable(existing?.id) { mutableStateOf(existing?.date ?: todayString()) }
     var category by rememberSaveable(existing?.id) { mutableStateOf(existing?.category ?: "Other") }
     var vendor by rememberSaveable(existing?.id) { mutableStateOf(existing?.vendor.orEmpty()) }
     var amount by rememberSaveable(existing?.id) { mutableStateOf(existing?.amount.orEmpty()) }
     var payment by rememberSaveable(existing?.id) { mutableStateOf(existing?.paymentMethod ?: "Reimbursable") }
     var notes by rememberSaveable(existing?.id) { mutableStateOf(existing?.notes.orEmpty()) }
+    var receiptPaths by rememberSaveable(existing?.id) { mutableStateOf(existing?.receiptPhotoPaths ?: emptyList()) }
     fun currentExpense(): VisitExpense = (existing ?: VisitExpense()).copy(
         date = date.trim(),
         category = category.trim(),
         vendor = vendor.trim(),
         amount = amount.trim(),
         paymentMethod = payment.trim(),
-        notes = notes.trim()
+        notes = notes.trim(),
+        receiptPhotoPaths = receiptPaths
     )
     FormDialog(if (existing == null) "Add Expense" else "Edit Expense", onDismiss, onSave = { onSave(currentExpense()) }) {
         FormTextField("Date", date) { date = it }
@@ -1058,12 +1079,67 @@ fun ExpenseDialog(existing: VisitExpense? = null, onDismiss: () -> Unit, onSave:
         FormTextField("Amount", amount, keyboardType = KeyboardType.Decimal) { amount = it }
         SimpleDropdown("Payment Method", payment, PAYMENT_METHODS) { payment = it }
         FormTextField("Notes", notes, minLines = 3) { notes = it }
+        if (existing != null) {
+            ReceiptManagerSection(
+                receiptPaths = receiptPaths,
+                onDeleteReceipt = { path ->
+                    receiptPaths = receiptPaths.filterNot { it == path }
+                    onDeleteReceipt?.invoke(existing.id, path)
+                }
+            )
+        }
         if (onSaveAndScanReceipt != null) {
             OutlinedButton(onClick = { onSaveAndScanReceipt(currentExpense()) }, modifier = Modifier.fillMaxWidth()) {
                 Text(if (existing == null) "Save & Document Scan Receipt" else "Save & Scan Another Receipt")
             }
             HintText("Use this from the expense form when you are entering mileage, meal, parts, or other advanced expense details.")
         }
+    }
+}
+
+@Composable
+fun ReceiptManagerSection(receiptPaths: List<String>, onDeleteReceipt: (String) -> Unit) {
+    if (receiptPaths.isEmpty()) {
+        HintText("No receipts attached yet. Save & scan to add one.")
+        return
+    }
+    val context = LocalContext.current
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Attached receipts", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = GalvyxCyan)
+        receiptPaths.forEachIndexed { index, path ->
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = GalvyxCardElevated,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    val bitmap = remember(path) { loadBitmap(context, path) }
+                    if (bitmap != null) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = "Receipt scan ${index + 1}",
+                            modifier = Modifier.size(width = 72.dp, height = 54.dp),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Surface(modifier = Modifier.size(width = 72.dp, height = 54.dp), shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                            Box(contentAlignment = Alignment.Center) { Text("Receipt", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        }
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Receipt scan ${index + 1}", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text("Attached to this expense", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(onClick = { onDeleteReceipt(path) }) { Text("Remove") }
+                }
+            }
+        }
+        HintText("Removing a receipt only removes it from this expense/report; app-owned scan files are cleaned up safely.")
     }
 }
 
