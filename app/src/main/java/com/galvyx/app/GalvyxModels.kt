@@ -195,7 +195,8 @@ data class VisitPhoto(
     val path: String,
     val caption: String = "",
     val category: String = "General",
-    val stage: String = "Reference"
+    val stage: String = "Reference",
+    val rotationDegrees: Int = 0
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
@@ -203,6 +204,7 @@ data class VisitPhoto(
         .put("caption", caption)
         .put("category", category)
         .put("stage", stage)
+        .put("rotationDegrees", rotationDegrees)
 
     val reportLabel: String
         get() = listOf(category, stage).filter { it.isNotBlank() }.joinToString(" • ").ifBlank { "Photo" }
@@ -213,10 +215,13 @@ data class VisitPhoto(
             path = json.optString("path"),
             caption = json.optString("caption"),
             category = json.optString("category", "General"),
-            stage = json.optString("stage", "Reference")
+            stage = json.optString("stage", "Reference"),
+            rotationDegrees = json.optInt("rotationDegrees", 0).normalizedRotationDegrees()
         )
     }
 }
+
+fun Int.normalizedRotationDegrees(): Int = ((this % 360) + 360) % 360
 
 data class SiteVisit(
     val id: String = UUID.randomUUID().toString(),

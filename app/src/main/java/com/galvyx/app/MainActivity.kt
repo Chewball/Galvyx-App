@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
@@ -88,6 +89,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
+import androidx.exifinterface.media.ExifInterface
 import com.galvyx.app.ui.theme.GalvyxAlienGreen
 import com.galvyx.app.ui.theme.GalvyxCardElevated
 import com.galvyx.app.ui.theme.GalvyxCyan
@@ -1219,12 +1221,14 @@ fun PhotoCaptionDialog(existing: VisitPhoto? = null, onDismiss: () -> Unit, onSa
     var category by rememberSaveable(existing?.id) { mutableStateOf(existing?.category ?: "General") }
     var stage by rememberSaveable(existing?.id) { mutableStateOf(existing?.stage ?: "Reference") }
     var caption by rememberSaveable(existing?.id) { mutableStateOf(existing?.caption.orEmpty()) }
+    var rotationDegrees by rememberSaveable(existing?.id) { mutableStateOf(existing?.rotationDegrees ?: 0) }
     FormDialog(if (existing == null) "Photo Saved" else "Edit Photo Details", onDismiss, saveLabel = if (existing == null) "Attach Photo" else "Save Photo", onSave = {
         onSave(
             (existing ?: VisitPhoto(path = "")).copy(
                 category = category.trim().ifBlank { "General" },
                 stage = stage.trim().ifBlank { "Reference" },
-                caption = caption.trim()
+                caption = caption.trim(),
+                rotationDegrees = rotationDegrees.normalizedRotationDegrees()
             )
         )
     }) {
@@ -1232,6 +1236,12 @@ fun PhotoCaptionDialog(existing: VisitPhoto? = null, onDismiss: () -> Unit, onSa
         SimpleDropdown("Category", category, PHOTO_CATEGORIES) { category = it }
         SimpleDropdown("Stage", stage, PHOTO_STAGES) { stage = it }
         FormTextField("Caption", caption) { caption = it }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = { rotationDegrees = (rotationDegrees + 270).normalizedRotationDegrees() }, modifier = Modifier.weight(1f)) { Text("Rotate Left") }
+            Text("${rotationDegrees.normalizedRotationDegrees()}°", modifier = Modifier.weight(0.7f), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = { rotationDegrees = (rotationDegrees + 90).normalizedRotationDegrees() }, modifier = Modifier.weight(1f)) { Text("Rotate Right") }
+        }
+        HintText("Galvyx auto-fixes camera orientation from the photo metadata. Use rotate only if a picture still looks sideways.")
     }
 }
 
@@ -1622,13 +1632,13 @@ fun PhotoDetailCard(photo: VisitPhoto, onEdit: () -> Unit, onDelete: () -> Unit)
             }
         }
         val context = LocalContext.current
-        val bitmap = remember(photo.path) { loadBitmap(context, photo.path) }
+        val bitmap = remember(photo.path, photo.rotationDegrees) { loadBitmap(context, photo.path, photo.rotationDegrees) }
         if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = photo.caption.ifBlank { "Site visit photo" },
                 modifier = Modifier.fillMaxWidth().height(180.dp),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Fit
             )
         } else {
             Text(photo.path, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1764,6 +1774,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 16f; isFakeBoldText = true }
     val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f }
     val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9f }
+    val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
     var pageNumber = 1
     var page = document.startPage(PdfDocument.PageInfo.Builder((logicalPageWidth * pdfScale).toInt(), (logicalPageHeight * pdfScale).toInt(), pageNumber).create())
     var canvas = page.canvas.apply { scale(pdfScale, pdfScale) }
@@ -1882,7 +1893,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
                         val width = receiptBitmap.width * scale
                         val height = receiptBitmap.height * scale
                         val left = 42f + ((maxWidth - width) / 2f)
-                        canvas.drawBitmap(receiptBitmap, null, android.graphics.RectF(left, y, left + width, y + height), null)
+                        canvas.drawBitmap(receiptBitmap, null, android.graphics.RectF(left, y, left + width, y + height), imagePaint)
                         y += height + 18f
                         if (y > 680f) newPage()
                     } else {
@@ -1904,15 +1915,20 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
                 categoryPhotos.forEachIndexed { index, photo ->
                     val title = "${index + 1}. ${photo.stage.ifBlank { "Reference" }}${if (photo.caption.isNotBlank()) ": ${photo.caption}" else ""}"
                     line(title)
-                    val bitmap = loadBitmap(context, photo.path)
+                    val bitmap = loadBitmap(context, photo.path, photo.rotationDegrees)
                     if (bitmap != null) {
-                        if (y > 610f) newPage()
-                        val maxWidth = 220f
-                        val scale = maxWidth / bitmap.width
-                        val width = maxWidth
+                        if (y > 250f) newPage()
+                        val maxWidth = 528f
+                        val maxHeight = 620f
+                        val widthScale = maxWidth / bitmap.width.toFloat()
+                        val heightScale = maxHeight / bitmap.height.toFloat()
+                        val scale = minOf(widthScale, heightScale)
+                        val width = bitmap.width * scale
                         val height = bitmap.height * scale
-                        canvas.drawBitmap(bitmap, null, android.graphics.RectF(42f, y, 42f + width, y + height.coerceAtMost(150f)), null)
-                        y += height.coerceAtMost(150f) + 12f
+                        val left = 42f + ((maxWidth - width) / 2f)
+                        canvas.drawBitmap(bitmap, null, android.graphics.RectF(left, y, left + width, y + height), imagePaint)
+                        y += height + 18f
+                        if (y > 680f) newPage()
                     } else {
                         line(photo.path)
                     }
@@ -1941,13 +1957,35 @@ private fun createReportTarget(context: Context, profile: CompanyProfile, displa
     return ReportTarget(uri, displayName, file.outputStream())
 }
 
-private fun loadBitmap(context: Context, reference: String): Bitmap? = runCatching {
-    if (reference.startsWith("content://")) {
+private fun loadBitmap(context: Context, reference: String, manualRotationDegrees: Int = 0): Bitmap? = runCatching {
+    val bitmap = if (reference.startsWith("content://")) {
         context.contentResolver.openInputStream(Uri.parse(reference))?.use { BitmapFactory.decodeStream(it) }
     } else {
         BitmapFactory.decodeFile(reference)
-    }
+    } ?: return@runCatching null
+    val autoRotation = readExifRotationDegrees(context, reference)
+    bitmap.rotateBitmap((autoRotation + manualRotationDegrees).normalizedRotationDegrees())
 }.getOrNull()
+
+private fun readExifRotationDegrees(context: Context, reference: String): Int = runCatching {
+    val orientation = if (reference.startsWith("content://")) {
+        context.contentResolver.openInputStream(Uri.parse(reference))?.use { ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
+    } else {
+        ExifInterface(reference).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+    } ?: ExifInterface.ORIENTATION_NORMAL
+    when (orientation) {
+        ExifInterface.ORIENTATION_ROTATE_90 -> 90
+        ExifInterface.ORIENTATION_ROTATE_180 -> 180
+        ExifInterface.ORIENTATION_ROTATE_270 -> 270
+        else -> 0
+    }
+}.getOrDefault(0)
+
+private fun Bitmap.rotateBitmap(degrees: Int): Bitmap {
+    if (degrees.normalizedRotationDegrees() == 0) return this
+    val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
+    return Bitmap.createBitmap(this, 0, 0, width, height, matrix, true)
+}
 
 private fun folderLabel(uri: String): String = Uri.parse(uri).lastPathSegment
     ?.substringAfterLast(':')

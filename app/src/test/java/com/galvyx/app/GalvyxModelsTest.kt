@@ -46,6 +46,23 @@ class GalvyxModelsTest {
         assertEquals("MDF rack", restored.first().photos.first().caption)
         assertEquals("MDF", restored.first().photos.first().category)
         assertEquals("Before", restored.first().photos.first().stage)
+        assertEquals(0, restored.first().photos.first().rotationDegrees)
+    }
+
+    @Test
+    fun photoRotationPersistsAndNormalizes() {
+        val visits = listOf(
+            SiteVisit(
+                photos = listOf(
+                    VisitPhoto(path = "/storage/sideways.jpg", caption = "Rack", rotationDegrees = 450)
+                )
+            )
+        )
+
+        val restored = visitsFromJson(visitsToJson(visits))
+
+        assertEquals(90, restored.first().photos.first().rotationDegrees)
+        assertEquals(270, (-90).normalizedRotationDegrees())
     }
 
     @Test
