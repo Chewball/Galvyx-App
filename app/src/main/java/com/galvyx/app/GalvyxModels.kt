@@ -196,7 +196,8 @@ data class VisitPhoto(
     val caption: String = "",
     val category: String = "General",
     val stage: String = "Reference",
-    val rotationDegrees: Int = 0
+    val rotationDegrees: Int = 0,
+    val isKeyPhoto: Boolean = false
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
@@ -205,6 +206,7 @@ data class VisitPhoto(
         .put("category", category)
         .put("stage", stage)
         .put("rotationDegrees", rotationDegrees)
+        .put("isKeyPhoto", isKeyPhoto)
 
     val reportLabel: String
         get() = listOf(category, stage).filter { it.isNotBlank() }.joinToString(" • ").ifBlank { "Photo" }
@@ -216,7 +218,8 @@ data class VisitPhoto(
             caption = json.optString("caption"),
             category = json.optString("category", "General"),
             stage = json.optString("stage", "Reference"),
-            rotationDegrees = json.optInt("rotationDegrees", 0).normalizedRotationDegrees()
+            rotationDegrees = json.optInt("rotationDegrees", 0).normalizedRotationDegrees(),
+            isKeyPhoto = json.optBoolean("isKeyPhoto", false)
         )
     }
 }
@@ -278,7 +281,7 @@ data class SiteVisit(
             notes.joinToString(" ") { listOf(it.location, it.category, it.title, it.notes).joinToString(" ") },
             devices.joinToString(" ") { listOf(it.location, it.deviceType, it.manufacturer, it.model, it.serialNumber, it.macAddress, it.ipAddress, it.hostname, it.notes).joinToString(" ") },
             expenses.joinToString(" ") { listOf(it.date, it.category, it.vendor, it.amount, it.paymentMethod, it.notes, it.receiptCountLabel).joinToString(" ") },
-            photos.joinToString(" ") { listOf(it.category, it.stage, it.caption).joinToString(" ") }
+            photos.joinToString(" ") { listOf(it.category, it.stage, it.caption, if (it.isKeyPhoto) "key photo" else "").joinToString(" ") }
         ).joinToString(" ").lowercase().contains(normalized)
     }
 

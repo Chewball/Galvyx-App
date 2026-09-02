@@ -98,6 +98,7 @@ import com.galvyx.app.ui.theme.GalvyxVioletBright
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.OutputStream
 import java.text.SimpleDateFormat
@@ -210,8 +211,28 @@ data class PdfExportOptions(
     val includeDevices: Boolean = true,
     val includeExpenses: Boolean = true,
     val includeExpenseReceipts: Boolean = true,
-    val includePhotos: Boolean = true
-)
+    val includePhotos: Boolean = true,
+    val exportMode: String = "Email-Friendly PDF",
+    val photoQuality: String = "Medium",
+    val photosToInclude: String = "Key Photos Only"
+) {
+    val keyPhotosOnly: Boolean
+        get() = photosToInclude == "Key Photos Only"
+
+    val maxPdfImageDimension: Int
+        get() = when (photoQuality) {
+            "Small" -> 1024
+            "Original / Archive" -> 2400
+            else -> 1600
+        }
+
+    val jpegQuality: Int
+        get() = when (photoQuality) {
+            "Small" -> 65
+            "Original / Archive" -> 92
+            else -> 78
+        }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1193,18 +1214,37 @@ fun DeviceDialog(existing: DeviceInfo? = null, onDismiss: () -> Unit, onSave: (D
 
 @Composable
 fun PdfExportOptionsDialog(visit: SiteVisit, onDismiss: () -> Unit, onExport: (PdfExportOptions) -> Unit) {
+    var exportMode by rememberSaveable { mutableStateOf("Email-Friendly PDF") }
+    var photoQuality by rememberSaveable { mutableStateOf("Medium") }
+    var photosToInclude by rememberSaveable { mutableStateOf(if (visit.photos.any { it.isKeyPhoto }) "Key Photos Only" else "All Photos") }
     var includeNotes by rememberSaveable { mutableStateOf(true) }
     var includeDevices by rememberSaveable { mutableStateOf(true) }
     var includeExpenses by rememberSaveable { mutableStateOf(true) }
     var includeExpenseReceipts by rememberSaveable { mutableStateOf(true) }
     var includePhotos by rememberSaveable { mutableStateOf(true) }
+    val keyPhotoCount = visit.photos.count { it.isKeyPhoto }
+    val selectedPhotoCount = if (photosToInclude == "Key Photos Only") keyPhotoCount else visit.photos.size
     val atLeastOneDetail = includeNotes || includeDevices || includeExpenses || includePhotos
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Choose PDF sections") },
+        title = { Text("Export / Share Report") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Export ${visit.title} with only the sections you need.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Control report size so big photo-heavy visits can still be emailed.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                if (visit.photos.size >= 12) HintText("Size warning: this visit has ${visit.photos.size} photos. Email-friendly mode with key photos is recommended.")
+                SimpleDropdown("Export Mode", exportMode, listOf("Email-Friendly PDF", "Full Evidence PDF")) { mode ->
+                    exportMode = mode
+                    if (mode == "Email-Friendly PDF") {
+                        photoQuality = "Medium"
+                        if (keyPhotoCount > 0) photosToInclude = "Key Photos Only"
+                    } else {
+                        photoQuality = "Original / Archive"
+                        photosToInclude = "All Photos"
+                    }
+                }
+                SimpleDropdown("Photo Quality", photoQuality, listOf("Small", "Medium", "Original / Archive")) { photoQuality = it }
+                SimpleDropdown("Photos", photosToInclude, listOf("Key Photos Only", "All Photos")) { photosToInclude = it }
+                Text("Selected for PDF: $selectedPhotoCount of ${visit.photos.size} photo(s). Key photos: $keyPhotoCount.", color = GalvyxCyan, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                 ExportOptionRow("Notes", "${visit.notes.size} note(s)", includeNotes) { includeNotes = it }
                 ExportOptionRow("Devices", "${visit.devices.size} device(s)", includeDevices) { includeDevices = it }
                 ExportOptionRow("Expenses", "${visit.expenses.size} expense(s)", includeExpenses) { checked ->
@@ -1213,6 +1253,7 @@ fun PdfExportOptionsDialog(visit: SiteVisit, onDismiss: () -> Unit, onExport: (P
                 }
                 ExportOptionRow("Expense receipt images", "Receipt photos under matching expenses", includeExpenseReceipts, enabled = includeExpenses) { includeExpenseReceipts = it }
                 ExportOptionRow("General photos", "${visit.photos.size} photo(s)", includePhotos) { includePhotos = it }
+                if (photosToInclude == "Key Photos Only" && keyPhotoCount == 0) HintText("No key photos are marked yet, so Galvyx will include all photos to avoid exporting an empty photo section.")
                 if (!atLeastOneDetail) HintText("Visit Summary is always included. Select at least one detail section for a useful report.")
             }
         },
@@ -1224,7 +1265,10 @@ fun PdfExportOptionsDialog(visit: SiteVisit, onDismiss: () -> Unit, onExport: (P
                         includeDevices = includeDevices,
                         includeExpenses = includeExpenses,
                         includeExpenseReceipts = includeExpenses && includeExpenseReceipts,
-                        includePhotos = includePhotos
+                        includePhotos = includePhotos,
+                        exportMode = exportMode,
+                        photoQuality = photoQuality,
+                        photosToInclude = photosToInclude
                     )
                 )
             }) { Text("Create PDF") }
@@ -1349,20 +1393,23 @@ fun PhotoCaptionDialog(existing: VisitPhoto? = null, onDismiss: () -> Unit, onSa
     var stage by rememberSaveable(existing?.id) { mutableStateOf(existing?.stage ?: "Reference") }
     var caption by rememberSaveable(existing?.id) { mutableStateOf(existing?.caption.orEmpty()) }
     var rotationDegrees by rememberSaveable(existing?.id) { mutableStateOf(existing?.rotationDegrees ?: 0) }
+    var isKeyPhoto by rememberSaveable(existing?.id) { mutableStateOf(existing?.isKeyPhoto ?: false) }
     FormDialog(if (existing == null) "Photo Saved" else "Edit Photo Details", onDismiss, saveLabel = if (existing == null) "Attach Photo" else "Save Photo", onSave = {
         onSave(
             (existing ?: VisitPhoto(path = "")).copy(
                 category = category.trim().ifBlank { "General" },
                 stage = stage.trim().ifBlank { "Reference" },
                 caption = caption.trim(),
-                rotationDegrees = rotationDegrees.normalizedRotationDegrees()
+                rotationDegrees = rotationDegrees.normalizedRotationDegrees(),
+                isKeyPhoto = isKeyPhoto
             )
         )
     }) {
-        Text("Tag the photo so reports can group before/after work and key network areas.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Tag the photo so reports can group before/after work and keep email PDFs smaller.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         SimpleDropdown("Category", category, PHOTO_CATEGORIES) { category = it }
         SimpleDropdown("Stage", stage, PHOTO_STAGES) { stage = it }
         FormTextField("Caption", caption) { caption = it }
+        ExportOptionRow("Key photo", "Include this in email-friendly reports", isKeyPhoto) { isKeyPhoto = it }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { rotationDegrees = (rotationDegrees + 270).normalizedRotationDegrees() }, modifier = Modifier.weight(1f)) { Text("Rotate Left") }
             Text("${rotationDegrees.normalizedRotationDegrees()}°", modifier = Modifier.weight(0.7f), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1751,7 +1798,7 @@ fun PhotoDetailCard(photo: VisitPhoto, onEdit: () -> Unit, onDelete: () -> Unit)
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(photo.caption.ifBlank { photo.category.ifBlank { "Photo" } }, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                Text("${photo.reportLabel} • Saved locally", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                Text("${photo.reportLabel}${if (photo.isKeyPhoto) " • Key Photo" else ""} • Saved locally", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = onEdit) { Text("Edit") }
@@ -1955,6 +2002,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     line("Date: ${visit.date}")
     line("Client Type: ${visit.clientTypeLabel}")
     line("Job Type: ${visit.jobType}")
+    line("Export Mode: ${options.exportMode} • Photo Quality: ${options.photoQuality} • Photos: ${options.photosToInclude}")
     line(visit.summary())
     val auditTemplate = auditTemplateFor(visit.clientTypeLabel)
     section("MSP Client Template")
@@ -2015,7 +2063,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
             if (options.includeExpenseReceipts) {
                 expense.receiptPhotoPaths.forEachIndexed { receiptIndex, receiptPath ->
                     line("Receipt scan ${receiptIndex + 1} - full size for reimbursement review")
-                    val receiptBitmap = loadBitmap(context, receiptPath)
+                    val receiptBitmap = loadBitmapForPdf(context, receiptPath, 0, options, isReceipt = true)
                     if (receiptBitmap != null) {
                         if (y > 250f) newPage()
                         val maxWidth = 528f
@@ -2041,14 +2089,16 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     if (options.includePhotos) {
         section("Photos")
         if (visit.photos.isEmpty()) line("No photos captured.")
-        visit.photos
+        if (visit.photos.isNotEmpty() && options.keyPhotosOnly && visit.photos.any { it.isKeyPhoto }) line("Showing key photos only for email-friendly report size.")
+        val reportPhotos = if (options.keyPhotosOnly && visit.photos.any { it.isKeyPhoto }) visit.photos.filter { it.isKeyPhoto } else visit.photos
+        reportPhotos
             .groupBy { it.category.ifBlank { "General" } }
             .forEach { (category, categoryPhotos) ->
                 line(category, headerPaint, 20f)
                 categoryPhotos.forEachIndexed { index, photo ->
-                    val title = "${index + 1}. ${photo.stage.ifBlank { "Reference" }}${if (photo.caption.isNotBlank()) ": ${photo.caption}" else ""}"
+                    val title = "${index + 1}. ${photo.stage.ifBlank { "Reference" }}${if (photo.isKeyPhoto) " • Key" else ""}${if (photo.caption.isNotBlank()) ": ${photo.caption}" else ""}"
                     line(title)
-                    val bitmap = loadBitmap(context, photo.path, photo.rotationDegrees)
+                    val bitmap = loadBitmapForPdf(context, photo.path, photo.rotationDegrees, options)
                     if (bitmap != null) {
                         if (y > 250f) newPage()
                         val maxWidth = 528f
@@ -2088,6 +2138,27 @@ private fun createReportTarget(context: Context, profile: CompanyProfile, displa
     val file = File(reportsDir, displayName)
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     return ReportTarget(uri, displayName, file.outputStream())
+}
+
+private fun loadBitmapForPdf(context: Context, reference: String, manualRotationDegrees: Int = 0, options: PdfExportOptions, isReceipt: Boolean = false): Bitmap? {
+    val source = loadBitmap(context, reference, manualRotationDegrees) ?: return null
+    val targetMaxDimension = if (isReceipt && options.exportMode == "Full Evidence PDF") {
+        maxOf(options.maxPdfImageDimension, 1800)
+    } else {
+        options.maxPdfImageDimension
+    }
+    val maxSide = maxOf(source.width, source.height)
+    val scaled = if (maxSide > targetMaxDimension) {
+        val scale = targetMaxDimension.toFloat() / maxSide.toFloat()
+        Bitmap.createScaledBitmap(source, (source.width * scale).toInt().coerceAtLeast(1), (source.height * scale).toInt().coerceAtLeast(1), true)
+    } else source
+    return if (options.jpegQuality >= 92) {
+        scaled
+    } else {
+        val output = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, options.jpegQuality, output)
+        BitmapFactory.decodeByteArray(output.toByteArray(), 0, output.size()) ?: scaled
+    }
 }
 
 private fun loadBitmap(context: Context, reference: String, manualRotationDegrees: Int = 0): Bitmap? = runCatching {

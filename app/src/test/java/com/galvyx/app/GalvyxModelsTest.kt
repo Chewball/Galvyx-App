@@ -29,7 +29,7 @@ class GalvyxModelsTest {
                 notes = listOf(VisitNote(location = "MDF", category = "Switch / Firewall", title = "Firewall", notes = "FCC listener checked")),
                 devices = listOf(DeviceInfo(location = "MDF", deviceType = "Firewall", manufacturer = "SonicWall", ipAddress = "10.0.31.31")),
                 expenses = listOf(VisitExpense(date = "2026-08-21", category = "Meal", vendor = "Cafe", amount = "18.50", receiptPhotoPaths = listOf("/storage/receipt-1.jpg", "content://receipt-2"))),
-                photos = listOf(VisitPhoto(path = "/storage/photo.jpg", caption = "MDF rack", category = "MDF", stage = "Before"))
+                photos = listOf(VisitPhoto(path = "/storage/photo.jpg", caption = "MDF rack", category = "MDF", stage = "Before", isKeyPhoto = true))
             )
         )
 
@@ -48,6 +48,7 @@ class GalvyxModelsTest {
         assertEquals("MDF rack", restored.first().photos.first().caption)
         assertEquals("MDF", restored.first().photos.first().category)
         assertEquals("Before", restored.first().photos.first().stage)
+        assertEquals(true, restored.first().photos.first().isKeyPhoto)
         assertEquals(0, restored.first().photos.first().rotationDegrees)
     }
 
