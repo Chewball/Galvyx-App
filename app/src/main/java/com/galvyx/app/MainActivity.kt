@@ -123,6 +123,14 @@ private val EXPENSE_CATEGORIES = listOf("Meal", "Gas", "Hotel", "Parking", "Tool
 private val PAYMENT_METHODS = listOf("Personal Card", "Company Card", "Cash", "Reimbursable", "Other")
 private val PHOTO_CATEGORIES = listOf("General", "MDF", "IDF", "Rack", "Firewall", "Switch", "Access Point", "Camera", "NVR", "PMS Workstation", "POS Terminal", "Door Lock Encoder", "Printer", "Plotter", "Line-of-Business App", "Cabling", "Damage", "Receipt", "Before / After", "Other")
 private val PHOTO_STAGES = listOf("Reference", "Before", "After", "Issue Found", "Completed Work", "Receipt")
+private val EMAIL_PLATFORMS = listOf("Unknown", "Microsoft 365", "Google Workspace", "Hosted Exchange", "cPanel / Webmail", "GoDaddy", "Rackspace", "Other")
+private val MFA_STATUSES = listOf("Unknown", "Enabled", "Partial", "Disabled", "Not Confirmed")
+private val FILE_STORAGE_PLATFORMS = listOf("Unknown", "SharePoint / OneDrive", "Google Drive", "Dropbox", "Box", "Local File Server", "NAS", "Other")
+private val BACKUP_PLATFORMS = listOf("Unknown", "Datto", "Veeam", "Acronis", "Windows Server Backup", "Synology / NAS", "Cloud Provider Snapshot", "Other")
+private val SECURITY_PLATFORMS = listOf("Unknown", "Huntress", "Bitdefender", "Microsoft Defender", "SentinelOne", "CrowdStrike", "Sophos", "Other")
+private val FIREWALL_PLATFORMS = listOf("Unknown", "SonicWall", "FortiGate", "UniFi Gateway", "Meraki", "pfSense", "WatchGuard", "Other")
+private val WIFI_PLATFORMS = listOf("Unknown", "UniFi", "Aruba", "Meraki", "Ruckus", "TP-Link Omada", "Other")
+private val RMM_PLATFORMS = listOf("Unknown", "Atera", "Datto RMM", "NinjaOne", "ConnectWise Automate", "Syncro", "None", "Other")
 
 data class ClientAuditTemplate(
     val type: String,
@@ -206,7 +214,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Screen { Home, NewVisit, Recent, VisitDetail, Settings }
-private enum class DialogKind { None, Note, Device, Expense, PhotoCaption, EditVisit, EditNote, EditDevice, EditExpense, EditPhoto, ExportOptions }
+private enum class DialogKind { None, Note, Device, Expense, PhotoCaption, EditVisit, EditCoreSystems, EditNote, EditDevice, EditExpense, EditPhoto, ExportOptions }
 private enum class DeleteKind { Visit, Note, Device, Expense, Photo }
 private data class DeleteRequest(val kind: DeleteKind, val id: String, val title: String)
 private data class ExportedReport(val uri: Uri, val displayName: String)
@@ -466,6 +474,7 @@ fun GalvyxApp(context: Context) {
                         onAddDevice = { dialog = DialogKind.Device },
                         onAddExpense = { dialog = DialogKind.Expense },
                         onEditVisit = { dialog = DialogKind.EditVisit },
+                        onEditCoreSystems = { dialog = DialogKind.EditCoreSystems },
                         onAddPhoto = {
                             val created = createPhotoUri(context, profile)
                             if (created == null) {
@@ -516,6 +525,11 @@ fun GalvyxApp(context: Context) {
                 visit = visit,
                 onDismiss = { dialog = DialogKind.None },
                 onSave = { updated -> upsertVisit(updated); dialog = DialogKind.None }
+            )
+            DialogKind.EditCoreSystems -> CoreSystemsDialog(
+                coreSystems = visit.coreSystems,
+                onDismiss = { dialog = DialogKind.None },
+                onSave = { systems -> upsertVisit(visit.copy(coreSystems = systems)); dialog = DialogKind.None }
             )
             DialogKind.EditNote -> visit.notes.firstOrNull { it.id == editingItemId }?.let { existing ->
                 NoteDialog(
@@ -867,6 +881,30 @@ fun TemplateDetailCard(template: ClientAuditTemplate) {
 }
 
 @Composable
+fun CoreSystemsCard(coreSystems: CoreSystems, onEdit: () -> Unit) {
+    CardPanel {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Core Systems", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Email, storage, security, firewall, Wi-Fi, RMM, and business platforms.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            }
+            TextButton(onClick = onEdit) { Text("Edit") }
+        }
+        val rows = coreSystems.summaryRows
+        if (rows.isEmpty()) {
+            SmallEmpty("No core systems captured yet")
+        } else {
+            rows.forEach { (label, value) ->
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                    Text(label, color = GalvyxCyan, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, modifier = Modifier.weight(0.8f))
+                    Text(value, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1.2f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun TemplateBulletGroup(title: String, rows: List<String>) {
     if (rows.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -969,6 +1007,7 @@ fun VisitDetailScreen(
     onAddExpense: () -> Unit,
     onAddPhoto: () -> Unit,
     onEditVisit: () -> Unit,
+    onEditCoreSystems: () -> Unit,
     onEditNote: (VisitNote) -> Unit,
     onEditDevice: (DeviceInfo) -> Unit,
     onEditExpense: (VisitExpense) -> Unit,
@@ -1009,12 +1048,14 @@ fun VisitDetailScreen(
                     "Add Photo" to onAddPhoto,
                     "Add Device" to onAddDevice,
                     "Add Expense" to onAddExpense,
+                    "Core Systems" to onEditCoreSystems,
                     "Edit Visit" to onEditVisit
                 )
                 PrimaryAction("Export / Share PDF Report", onClick = onExport)
             }
         }
         item { TemplateDetailCard(template) }
+        item { CoreSystemsCard(visit.coreSystems, onEdit = onEditCoreSystems) }
         if (visit.expenses.isNotEmpty()) item { ExpenseBreakdownCard(expenseBreakdown) }
         item { SectionHeader("Notes", visit.notes.size) }
         if (visit.notes.isEmpty()) item { SmallEmpty("No notes yet") }
@@ -1156,6 +1197,55 @@ fun SettingsScreen(
                 )
             )
         }
+    }
+}
+
+@Composable
+fun CoreSystemsDialog(coreSystems: CoreSystems, onDismiss: () -> Unit, onSave: (CoreSystems) -> Unit) {
+    var emailPlatform by rememberSaveable { mutableStateOf(coreSystems.emailPlatform) }
+    var emailDomain by rememberSaveable { mutableStateOf(coreSystems.emailDomain) }
+    var adminPortal by rememberSaveable { mutableStateOf(coreSystems.adminPortal) }
+    var mfaStatus by rememberSaveable { mutableStateOf(coreSystems.mfaStatus) }
+    var fileStorage by rememberSaveable { mutableStateOf(coreSystems.fileStorage) }
+    var backupPlatform by rememberSaveable { mutableStateOf(coreSystems.backupPlatform) }
+    var securityPlatform by rememberSaveable { mutableStateOf(coreSystems.securityPlatform) }
+    var firewallPlatform by rememberSaveable { mutableStateOf(coreSystems.firewallPlatform) }
+    var wifiPlatform by rememberSaveable { mutableStateOf(coreSystems.wifiPlatform) }
+    var rmmPlatform by rememberSaveable { mutableStateOf(coreSystems.rmmPlatform) }
+    var lineOfBusinessApps by rememberSaveable { mutableStateOf(coreSystems.lineOfBusinessApps) }
+    var notes by rememberSaveable { mutableStateOf(coreSystems.notes) }
+
+    FormDialog("Core Systems", onDismiss, onSave = {
+        onSave(
+            CoreSystems(
+                emailPlatform = emailPlatform,
+                emailDomain = emailDomain.trim(),
+                adminPortal = adminPortal.trim(),
+                mfaStatus = mfaStatus,
+                fileStorage = fileStorage,
+                backupPlatform = backupPlatform,
+                securityPlatform = securityPlatform,
+                firewallPlatform = firewallPlatform,
+                wifiPlatform = wifiPlatform,
+                rmmPlatform = rmmPlatform,
+                lineOfBusinessApps = lineOfBusinessApps.trim(),
+                notes = notes.trim()
+            )
+        )
+    }) {
+        HintText("Use this for platform inventory. Put troubleshooting details in Notes.")
+        SimpleDropdown("Email Platform", emailPlatform, EMAIL_PLATFORMS) { emailPlatform = it }
+        FormTextField("Email Domain", emailDomain) { emailDomain = it }
+        FormTextField("Admin Portal / Tenant", adminPortal) { adminPortal = it }
+        SimpleDropdown("MFA Status", mfaStatus, MFA_STATUSES) { mfaStatus = it }
+        SimpleDropdown("File Storage", fileStorage, FILE_STORAGE_PLATFORMS) { fileStorage = it }
+        SimpleDropdown("Backup Platform", backupPlatform, BACKUP_PLATFORMS) { backupPlatform = it }
+        SimpleDropdown("Security / EDR", securityPlatform, SECURITY_PLATFORMS) { securityPlatform = it }
+        SimpleDropdown("Firewall", firewallPlatform, FIREWALL_PLATFORMS) { firewallPlatform = it }
+        SimpleDropdown("Wi-Fi", wifiPlatform, WIFI_PLATFORMS) { wifiPlatform = it }
+        SimpleDropdown("RMM", rmmPlatform, RMM_PLATFORMS) { rmmPlatform = it }
+        FormTextField("Line-of-Business Apps", lineOfBusinessApps, minLines = 2) { lineOfBusinessApps = it }
+        FormTextField("Core Systems Notes", notes, minLines = 3) { notes = it }
     }
 }
 
@@ -2033,6 +2123,11 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     line(auditTemplate.summary)
     line("Core Systems: ${auditTemplate.coreSystems.joinToString(", ").take(90)}")
     auditTemplate.keyQuestions.take(5).forEachIndexed { index, question -> line("Q${index + 1}: $question") }
+
+    section("Core Systems Summary")
+    val coreRows = visit.coreSystems.summaryRows
+    if (coreRows.isEmpty()) line("No core systems captured.")
+    coreRows.forEach { (label, value) -> wrapped("$label: $value") }
 
     if (options.includeNotes) {
         section("Notes")

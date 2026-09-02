@@ -26,6 +26,7 @@ class GalvyxModelsTest {
                 date = "2026-08-21",
                 jobType = "Network Survey",
                 clientType = "Hotel / Hospitality",
+                coreSystems = CoreSystems(emailPlatform = "Microsoft 365", emailDomain = "reset.example", mfaStatus = "Enabled", firewallPlatform = "SonicWall", wifiPlatform = "UniFi", rmmPlatform = "Atera"),
                 notes = listOf(VisitNote(location = "MDF", category = "Switch / Firewall", title = "Firewall", notes = "FCC listener checked")),
                 devices = listOf(DeviceInfo(location = "MDF", deviceType = "Firewall", manufacturer = "SonicWall", ipAddress = "10.0.31.31")),
                 expenses = listOf(VisitExpense(date = "2026-08-21", category = "Meal", vendor = "Cafe", amount = "18.50", receiptPhotoPaths = listOf("/storage/receipt-1.jpg", "content://receipt-2"))),
@@ -40,6 +41,9 @@ class GalvyxModelsTest {
         assertEquals("Lake Tahoe Network Survey", restored.first().projectName)
         assertEquals("Network Survey", restored.first().jobType)
         assertEquals("Hotel / Hospitality", restored.first().clientTypeLabel)
+        assertEquals("Microsoft 365", restored.first().coreSystems.emailPlatform)
+        assertEquals("reset.example", restored.first().coreSystems.emailDomain)
+        assertEquals("SonicWall", restored.first().coreSystems.firewallPlatform)
         assertEquals("Firewall", restored.first().notes.first().title)
         assertEquals("10.0.31.31", restored.first().devices.first().ipAddress)
         assertEquals("18.50", restored.first().expenses.first().amount)
@@ -88,6 +92,7 @@ class GalvyxModelsTest {
             projectName = "Tahoe Refresh",
             technicianName = "Omar",
             jobType = "Network Survey",
+            coreSystems = CoreSystems(emailPlatform = "Google Workspace", emailDomain = "example.com", securityPlatform = "Huntress"),
             notes = listOf(VisitNote(location = "MDF", title = "Firewall", notes = "FCC listener checked")),
             devices = listOf(DeviceInfo(hostname = "sw-core", ipAddress = "10.0.31.31")),
             expenses = listOf(VisitExpense(vendor = "Fuel Stop", amount = "\$42.10")),
@@ -98,6 +103,8 @@ class GalvyxModelsTest {
         assertEquals(true, visit.matchesSearch("10.0.31.31"))
         assertEquals(true, visit.matchesSearch("rack overview"))
         assertEquals(true, visit.matchesSearch("mdf after"))
+        assertEquals(true, visit.matchesSearch("google workspace"))
+        assertEquals(true, visit.matchesSearch("huntress"))
         assertEquals(false, visit.matchesSearch("unknown-client"))
     }
 

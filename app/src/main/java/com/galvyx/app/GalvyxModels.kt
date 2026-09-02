@@ -226,6 +226,67 @@ data class VisitPhoto(
 
 fun Int.normalizedRotationDegrees(): Int = ((this % 360) + 360) % 360
 
+data class CoreSystems(
+    val emailPlatform: String = "Unknown",
+    val emailDomain: String = "",
+    val adminPortal: String = "",
+    val mfaStatus: String = "Unknown",
+    val fileStorage: String = "Unknown",
+    val backupPlatform: String = "Unknown",
+    val securityPlatform: String = "Unknown",
+    val firewallPlatform: String = "Unknown",
+    val wifiPlatform: String = "Unknown",
+    val rmmPlatform: String = "Unknown",
+    val lineOfBusinessApps: String = "",
+    val notes: String = ""
+) {
+    val summaryRows: List<Pair<String, String>>
+        get() = listOf(
+            "Email" to listOf(emailPlatform, emailDomain).filter { it.isNotBlank() && it != "Unknown" }.joinToString(" • ").ifBlank { emailPlatform },
+            "Admin Portal" to adminPortal,
+            "MFA" to mfaStatus,
+            "File Storage" to fileStorage,
+            "Backups" to backupPlatform,
+            "Security" to securityPlatform,
+            "Firewall" to firewallPlatform,
+            "Wi-Fi" to wifiPlatform,
+            "RMM" to rmmPlatform,
+            "Business Apps" to lineOfBusinessApps,
+            "Notes" to notes
+        ).filter { it.second.isNotBlank() && it.second != "Unknown" }
+
+    fun toJson(): JSONObject = JSONObject()
+        .put("emailPlatform", emailPlatform)
+        .put("emailDomain", emailDomain)
+        .put("adminPortal", adminPortal)
+        .put("mfaStatus", mfaStatus)
+        .put("fileStorage", fileStorage)
+        .put("backupPlatform", backupPlatform)
+        .put("securityPlatform", securityPlatform)
+        .put("firewallPlatform", firewallPlatform)
+        .put("wifiPlatform", wifiPlatform)
+        .put("rmmPlatform", rmmPlatform)
+        .put("lineOfBusinessApps", lineOfBusinessApps)
+        .put("notes", notes)
+
+    companion object {
+        fun fromJson(json: JSONObject?): CoreSystems = CoreSystems(
+            emailPlatform = json?.optString("emailPlatform", "Unknown") ?: "Unknown",
+            emailDomain = json?.optString("emailDomain") ?: "",
+            adminPortal = json?.optString("adminPortal") ?: "",
+            mfaStatus = json?.optString("mfaStatus", "Unknown") ?: "Unknown",
+            fileStorage = json?.optString("fileStorage", "Unknown") ?: "Unknown",
+            backupPlatform = json?.optString("backupPlatform", "Unknown") ?: "Unknown",
+            securityPlatform = json?.optString("securityPlatform", "Unknown") ?: "Unknown",
+            firewallPlatform = json?.optString("firewallPlatform", "Unknown") ?: "Unknown",
+            wifiPlatform = json?.optString("wifiPlatform", "Unknown") ?: "Unknown",
+            rmmPlatform = json?.optString("rmmPlatform", "Unknown") ?: "Unknown",
+            lineOfBusinessApps = json?.optString("lineOfBusinessApps") ?: "",
+            notes = json?.optString("notes") ?: ""
+        )
+    }
+}
+
 data class SiteVisit(
     val id: String = UUID.randomUUID().toString(),
     val clientName: String = "",
@@ -234,6 +295,7 @@ data class SiteVisit(
     val date: String = "",
     val jobType: String = "General Service Call",
     val clientType: String = "General Business",
+    val coreSystems: CoreSystems = CoreSystems(),
     val notes: List<VisitNote> = emptyList(),
     val devices: List<DeviceInfo> = emptyList(),
     val expenses: List<VisitExpense> = emptyList(),
@@ -278,6 +340,7 @@ data class SiteVisit(
             date,
             jobType,
             clientTypeLabel,
+            coreSystems.summaryRows.joinToString(" ") { "${it.first} ${it.second}" },
             notes.joinToString(" ") { listOf(it.location, it.category, it.title, it.notes).joinToString(" ") },
             devices.joinToString(" ") { listOf(it.location, it.deviceType, it.manufacturer, it.model, it.serialNumber, it.macAddress, it.ipAddress, it.hostname, it.notes).joinToString(" ") },
             expenses.joinToString(" ") { listOf(it.date, it.category, it.vendor, it.amount, it.paymentMethod, it.notes, it.receiptCountLabel).joinToString(" ") },
@@ -293,6 +356,7 @@ data class SiteVisit(
         .put("date", date)
         .put("jobType", jobType)
         .put("clientType", clientTypeLabel)
+        .put("coreSystems", coreSystems.toJson())
         .put("notes", notes.toJsonArray { it.toJson() })
         .put("devices", devices.toJsonArray { it.toJson() })
         .put("expenses", expenses.toJsonArray { it.toJson() })
@@ -307,6 +371,7 @@ data class SiteVisit(
             date = json.optString("date"),
             jobType = json.optString("jobType", "General Service Call"),
             clientType = json.optString("clientType", "General Business"),
+            coreSystems = CoreSystems.fromJson(json.optJSONObject("coreSystems")),
             notes = json.optJSONArray("notes").toList { VisitNote.fromJson(it) },
             devices = json.optJSONArray("devices").toList { DeviceInfo.fromJson(it) },
             expenses = json.optJSONArray("expenses").toList { VisitExpense.fromJson(it) },
