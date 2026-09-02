@@ -25,6 +25,7 @@ class GalvyxModelsTest {
                 technicianName = "Omar",
                 date = "2026-08-21",
                 jobType = "Network Survey",
+                clientType = "Hotel / Hospitality",
                 notes = listOf(VisitNote(location = "MDF", category = "Switch / Firewall", title = "Firewall", notes = "FCC listener checked")),
                 devices = listOf(DeviceInfo(location = "MDF", deviceType = "Firewall", manufacturer = "SonicWall", ipAddress = "10.0.31.31")),
                 expenses = listOf(VisitExpense(date = "2026-08-21", category = "Meal", vendor = "Cafe", amount = "18.50", receiptPhotoPaths = listOf("/storage/receipt-1.jpg", "content://receipt-2"))),
@@ -38,6 +39,7 @@ class GalvyxModelsTest {
         assertEquals("Reset", restored.first().clientName)
         assertEquals("Lake Tahoe Network Survey", restored.first().projectName)
         assertEquals("Network Survey", restored.first().jobType)
+        assertEquals("Hotel / Hospitality", restored.first().clientTypeLabel)
         assertEquals("Firewall", restored.first().notes.first().title)
         assertEquals("10.0.31.31", restored.first().devices.first().ipAddress)
         assertEquals("18.50", restored.first().expenses.first().amount)

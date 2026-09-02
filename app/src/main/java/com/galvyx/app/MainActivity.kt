@@ -109,13 +109,83 @@ private const val PREF_VISITS = "visits"
 private const val PREF_PROFILE = "profile"
 private const val AUTO_BACKUP_FILE_NAME = "galvyx-auto-backup.json"
 
-private val JOB_TYPES = listOf("General Service Call", "Network Survey", "Camera / Security", "Access Point / Wi-Fi", "Workstation Replacement", "Server / Firewall", "Low Voltage / Cabling", "Inspection", "Other")
-private val NOTE_CATEGORIES = listOf("General Note", "Network Port", "Switch / Firewall", "Access Point / Wi-Fi", "Camera", "Workstation", "Server", "Cable / Low Voltage", "Power", "Expense / Receipt", "Issue Found", "Completed Work", "Follow-Up Needed")
-private val DEVICE_TYPES = listOf("Firewall", "Switch", "Access Point", "Camera", "NVR / DVR", "Server", "Workstation", "Printer", "Payment Terminal", "Time Clock", "UPS / Battery Backup", "Other")
+private val JOB_TYPES = listOf("General Service Call", "Initial MSP Assessment", "Network Survey", "Camera / Security", "Access Point / Wi-Fi", "Workstation Replacement", "Server / Firewall", "Low Voltage / Cabling", "Inspection", "Other")
+private val CLIENT_TYPES = listOf("General Business", "Hotel / Hospitality", "Construction", "Restaurant / Bar", "Medical / Dental", "Retail", "Warehouse / Manufacturing", "Custom")
+private val NOTE_CATEGORIES = listOf("General Note", "Network Port", "Switch / Firewall", "Access Point / Wi-Fi", "Camera", "Workstation", "Server", "Cable / Low Voltage", "Power", "PMS / Business App", "POS / Payments", "Door Locks / Access", "Line-of-Business App", "Compliance / Risk", "Expense / Receipt", "Issue Found", "Completed Work", "Follow-Up Needed")
+private val DEVICE_TYPES = listOf("Firewall", "Switch", "Access Point", "Camera", "NVR / DVR", "Server", "Workstation", "Printer", "Payment Terminal", "Key Encoder", "Door Lock Controller", "Tablet / Mobile Device", "Plotter / Large Format Printer", "VoIP Phone", "Time Clock", "UPS / Battery Backup", "Other")
 private val EXPENSE_CATEGORIES = listOf("Meal", "Gas", "Hotel", "Parking", "Tools / Supplies", "Equipment", "Mileage", "Toll", "Shipping", "Other")
 private val PAYMENT_METHODS = listOf("Personal Card", "Company Card", "Cash", "Reimbursable", "Other")
-private val PHOTO_CATEGORIES = listOf("General", "MDF", "IDF", "Rack", "Firewall", "Switch", "Access Point", "Camera", "Cabling", "Damage", "Receipt", "Before / After", "Other")
+private val PHOTO_CATEGORIES = listOf("General", "MDF", "IDF", "Rack", "Firewall", "Switch", "Access Point", "Camera", "NVR", "PMS Workstation", "POS Terminal", "Door Lock Encoder", "Printer", "Plotter", "Line-of-Business App", "Cabling", "Damage", "Receipt", "Before / After", "Other")
 private val PHOTO_STAGES = listOf("Reference", "Before", "After", "Issue Found", "Completed Work", "Receipt")
+
+data class ClientAuditTemplate(
+    val type: String,
+    val summary: String,
+    val coreSystems: List<String>,
+    val keyQuestions: List<String>,
+    val recommendedPhotos: List<String>
+)
+
+private val CLIENT_AUDIT_TEMPLATES = listOf(
+    ClientAuditTemplate(
+        type = "General Business",
+        summary = "Baseline MSP audit for workstations, Microsoft 365, network, printers, backups, and security posture.",
+        coreSystems = listOf("Microsoft 365 / Email", "Workstations", "Firewall / Switches / Wi-Fi", "Printers", "Backups", "Endpoint Security"),
+        keyQuestions = listOf("Who owns admin access?", "Are MFA and endpoint security enabled?", "Where are important files stored?", "What breaks the business if it goes offline?"),
+        recommendedPhotos = listOf("MDF / rack", "Firewall", "Switches", "Workstations", "Printers", "UPS")
+    ),
+    ClientAuditTemplate(
+        type = "Hotel / Hospitality",
+        summary = "Hotel audit focused on guest check-in, PMS, door locks, POS, cameras, guest Wi-Fi, and front desk continuity.",
+        coreSystems = listOf("PMS / Property Management", "Door Locks / Key Encoders", "Restaurant POS", "Guest Wi-Fi", "Camera / NVR", "Front Desk Workstations", "Printers", "UniFi / Network"),
+        keyQuestions = listOf("Can another device check guests in if the front desk PC fails?", "Does PMS integrate with door locks?", "Is the Visionline/database backup documented?", "Are POS, cameras, staff, and guest networks separated?", "Who has vendor support access?"),
+        recommendedPhotos = listOf("Front desk PC", "Key encoder", "PMS/printer setup", "POS terminals", "NVR/camera status", "UniFi rack", "ISP/UPS")
+    ),
+    ClientAuditTemplate(
+        type = "Construction",
+        summary = "Construction audit for plan software, large files, plotters, SharePoint/project storage, remote access, and field devices.",
+        coreSystems = listOf("Bluebeam", "AutoCAD / Revit", "Autodesk Construction Cloud / PlanGrid", "SharePoint / File Server", "Large Format Plotter", "VPN / Remote Access", "Field Tablets"),
+        keyQuestions = listOf("How many Bluebeam/CAD users are licensed?", "Where are project drawings stored?", "Are large PDFs slow to open?", "Is plotter scanning/printing reliable?", "Do field users need tablet access?"),
+        recommendedPhotos = listOf("CAD workstations", "Plotter model/serial", "Network settings page", "Jobsite Wi-Fi gear", "File storage screen", "VPN/network rack")
+    ),
+    ClientAuditTemplate(
+        type = "Restaurant / Bar",
+        summary = "Restaurant audit for POS uptime, kitchen printers/KDS, payment terminals, guest Wi-Fi, cameras, music/TV, and network segmentation.",
+        coreSystems = listOf("Toast / POS", "Payment Terminals", "Kitchen Printers / KDS", "Guest Wi-Fi", "Cameras", "Music / TV / AV", "Firewall / Switches"),
+        keyQuestions = listOf("Is POS on a dedicated network?", "Are kitchen printers static/reserved?", "Who calls POS vendor support?", "Is internet failover required?", "Are payment support boundaries clear?"),
+        recommendedPhotos = listOf("POS terminals", "Kitchen printers", "KDS screens", "Payment devices", "Network rack", "Camera/NVR", "ISP gear")
+    ),
+    ClientAuditTemplate(
+        type = "Medical / Dental",
+        summary = "Medical/dental audit for practice software, imaging devices, HIPAA risk, backups, workstations by room, and vendor boundaries.",
+        coreSystems = listOf("Practice Management Software", "Imaging / X-ray", "M365 / Email", "Backups", "HIPAA Security", "Room Workstations", "Printers / Scanners"),
+        keyQuestions = listOf("What systems store patient data?", "Are backups tested and documented?", "Who supports imaging hardware/software?", "Are shared logins avoided?", "Is MFA enabled for cloud access?"),
+        recommendedPhotos = listOf("Server/NAS", "Operatories/workstations", "Imaging workstation", "Network rack", "Backup device", "Printers/scanners")
+    ),
+    ClientAuditTemplate(
+        type = "Retail",
+        summary = "Retail audit for POS, inventory, barcode scanners, receipt printers, cameras, Wi-Fi, and payment network boundaries.",
+        coreSystems = listOf("POS", "Inventory System", "Barcode Scanners", "Receipt Printers", "Payment Terminals", "Cameras", "Guest Wi-Fi"),
+        keyQuestions = listOf("What happens if POS/internet fails?", "Are payment devices segmented?", "Are scanners/printers documented?", "Who owns vendor admin access?"),
+        recommendedPhotos = listOf("POS station", "Payment terminal", "Receipt printer", "Scanner", "Network gear", "Cameras")
+    ),
+    ClientAuditTemplate(
+        type = "Warehouse / Manufacturing",
+        summary = "Warehouse/manufacturing audit for Wi-Fi coverage, barcode/RF devices, inventory/ERP systems, rugged devices, cameras, and uptime risks.",
+        coreSystems = listOf("ERP / Inventory", "Barcode / RF Scanners", "Warehouse Wi-Fi", "Label Printers", "Rugged Workstations", "Cameras", "Network / UPS"),
+        keyQuestions = listOf("Where are Wi-Fi dead spots?", "Which devices stop shipping/receiving?", "Are label printers static/reserved?", "Is network gear on UPS?", "Who supports ERP/inventory software?"),
+        recommendedPhotos = listOf("Warehouse APs", "Scanner docks", "Label printers", "Shipping stations", "Network rack", "UPS", "Cameras")
+    ),
+    ClientAuditTemplate(
+        type = "Custom",
+        summary = "Custom template for niche clients. Use notes and photos to define line-of-business systems, risk, and vendor boundaries.",
+        coreSystems = listOf("Line-of-Business App", "Network", "Workstations", "Printers", "Backups", "Vendor Support"),
+        keyQuestions = listOf("What software runs the business?", "Who supports it?", "Where is data stored?", "What needs a backup/recovery plan?"),
+        recommendedPhotos = listOf("Critical workstation", "Application/version screen", "Network gear", "Printers", "Vendor labels")
+    )
+)
+
+private fun auditTemplateFor(clientType: String): ClientAuditTemplate = CLIENT_AUDIT_TEMPLATES.firstOrNull { it.type == clientType } ?: CLIENT_AUDIT_TEMPLATES.first()
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -730,12 +800,51 @@ fun GalvyxLogo(modifier: Modifier = Modifier) {
 
 
 @Composable
+fun TemplatePreviewCard(template: ClientAuditTemplate) {
+    CardPanel {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("MSP Client Template", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text(template.type, color = GalvyxCyan, fontWeight = FontWeight.SemiBold)
+            }
+            NeonPill("Audit Ready", GalvyxAlienGreen)
+        }
+        Text(template.summary, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TemplateBulletGroup("Core systems", template.coreSystems.take(5))
+        TemplateBulletGroup("Photos to capture", template.recommendedPhotos.take(4))
+    }
+}
+
+@Composable
+fun TemplateDetailCard(template: ClientAuditTemplate) {
+    CardPanel {
+        Text("${template.type} Audit Guide", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text(template.summary, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TemplateBulletGroup("Core systems to document", template.coreSystems)
+        TemplateBulletGroup("Questions to answer", template.keyQuestions)
+        TemplateBulletGroup("Recommended photo evidence", template.recommendedPhotos)
+        HintText("Use Add Note for answers, Add Device for assets, and Add Photo with categories like PMS Workstation, POS Terminal, Door Lock Encoder, Plotter, NVR, MDF, and IDF.")
+    }
+}
+
+@Composable
+fun TemplateBulletGroup(title: String, rows: List<String>) {
+    if (rows.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, fontWeight = FontWeight.SemiBold, color = GalvyxCyan, fontSize = 13.sp)
+        rows.forEach { row -> Text("• $row", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
+    }
+}
+
+@Composable
 fun NewVisitScreen(defaultTechnician: String, onSave: (SiteVisit) -> Unit) {
     var client by rememberSaveable { mutableStateOf("") }
     var project by rememberSaveable { mutableStateOf("") }
     var tech by rememberSaveable { mutableStateOf(defaultTechnician) }
     var date by rememberSaveable { mutableStateOf(todayString()) }
-    var jobType by rememberSaveable { mutableStateOf("General Service Call") }
+    var jobType by rememberSaveable { mutableStateOf("Initial MSP Assessment") }
+    var clientType by rememberSaveable { mutableStateOf("General Business") }
+    val template = auditTemplateFor(clientType)
 
     FormColumn {
         Text("Create the shell first, then add notes/photos/devices/expenses from the visit page.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -743,10 +852,12 @@ fun NewVisitScreen(defaultTechnician: String, onSave: (SiteVisit) -> Unit) {
         FormTextField("Project Name", project) { project = it }
         FormTextField("Technician Name", tech) { tech = it }
         FormTextField("Date", date) { date = it }
+        SimpleDropdown("Client Type", clientType, CLIENT_TYPES) { clientType = it }
         SimpleDropdown("Job Type", jobType, JOB_TYPES) { jobType = it }
+        TemplatePreviewCard(template)
         PrimaryAction("Save Site Visit") {
             if (client.isBlank() && project.isBlank()) return@PrimaryAction
-            onSave(SiteVisit(clientName = client.trim(), projectName = project.trim(), technicianName = tech.trim(), date = date.trim(), jobType = jobType.trim().ifBlank { "General Service Call" }))
+            onSave(SiteVisit(clientName = client.trim(), projectName = project.trim(), technicianName = tech.trim(), date = date.trim(), jobType = jobType.trim().ifBlank { "General Service Call" }, clientType = clientType.trim().ifBlank { "General Business" }))
         }
     }
 }
@@ -755,9 +866,13 @@ fun NewVisitScreen(defaultTechnician: String, onSave: (SiteVisit) -> Unit) {
 fun RecentVisitsScreen(visits: List<SiteVisit>, onOpen: (SiteVisit) -> Unit, onDelete: (SiteVisit) -> Unit, onNewVisit: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     var jobFilter by rememberSaveable { mutableStateOf("All Job Types") }
+    var clientTypeFilter by rememberSaveable { mutableStateOf("All Client Types") }
     val jobOptions = listOf("All Job Types") + JOB_TYPES
+    val clientTypeOptions = listOf("All Client Types") + CLIENT_TYPES
     val filteredVisits = visits.filter { visit ->
-        visit.matchesSearch(query) && (jobFilter == "All Job Types" || visit.jobType == jobFilter)
+        visit.matchesSearch(query) &&
+            (jobFilter == "All Job Types" || visit.jobType == jobFilter) &&
+            (clientTypeFilter == "All Client Types" || visit.clientTypeLabel == clientTypeFilter)
     }
 
     if (visits.isEmpty()) {
@@ -771,6 +886,7 @@ fun RecentVisitsScreen(visits: List<SiteVisit>, onOpen: (SiteVisit) -> Unit, onD
                 Text("Find a visit", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 FormTextField("Search client, project, tech, notes, devices, expenses", query) { query = it }
                 SimpleDropdown("Job Filter", jobFilter, jobOptions) { jobFilter = it }
+                SimpleDropdown("Client Type Filter", clientTypeFilter, clientTypeOptions) { clientTypeFilter = it }
                 Text("${filteredVisits.size} of ${visits.size} visits", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
             }
         }
@@ -784,7 +900,10 @@ fun RecentVisitsScreen(visits: List<SiteVisit>, onOpen: (SiteVisit) -> Unit, onD
                         Text(visit.title, fontWeight = FontWeight.Bold, fontSize = 20.sp)
                         Text("${visit.date} • ${visit.technicianName.ifBlank { "Technician TBD" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    NeonPill(visit.jobType.take(18), GalvyxCyan)
+                    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        NeonPill(visit.clientTypeLabel.take(18), GalvyxAlienGreen)
+                        NeonPill(visit.jobType.take(18), GalvyxCyan)
+                    }
                 }
                 VisitMetricRow(
                     notes = visit.notes.size,
@@ -823,6 +942,7 @@ fun VisitDetailScreen(
     onExport: () -> Unit
 ) {
     val expenseBreakdown = visit.expenseBreakdown
+    val template = auditTemplateFor(visit.clientTypeLabel)
     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             CardPanel {
@@ -831,7 +951,10 @@ fun VisitDetailScreen(
                         Text(visit.title, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Text("${visit.date} • ${visit.technicianName.ifBlank { "Technician not set" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    NeonPill(visit.jobType, GalvyxVioletBright)
+                    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        NeonPill(visit.clientTypeLabel, GalvyxAlienGreen)
+                        NeonPill(visit.jobType, GalvyxVioletBright)
+                    }
                 }
                 Text(visit.summary(), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 VisitMetricRow(
@@ -852,6 +975,7 @@ fun VisitDetailScreen(
                 PrimaryAction("Export / Share PDF Report", onClick = onExport)
             }
         }
+        item { TemplateDetailCard(template) }
         if (visit.expenses.isNotEmpty()) item { ExpenseBreakdownCard(expenseBreakdown) }
         item { SectionHeader("Notes", visit.notes.size) }
         if (visit.notes.isEmpty()) item { SmallEmpty("No notes yet") }
@@ -1003,15 +1127,18 @@ fun VisitDialog(visit: SiteVisit, onDismiss: () -> Unit, onSave: (SiteVisit) -> 
     var tech by rememberSaveable(visit.id) { mutableStateOf(visit.technicianName) }
     var date by rememberSaveable(visit.id) { mutableStateOf(visit.date) }
     var jobType by rememberSaveable(visit.id) { mutableStateOf(visit.jobType) }
+    var clientType by rememberSaveable(visit.id) { mutableStateOf(visit.clientTypeLabel) }
     FormDialog("Edit Visit", onDismiss, onSave = {
         if (client.isBlank() && project.isBlank()) return@FormDialog
-        onSave(visit.copy(clientName = client.trim(), projectName = project.trim(), technicianName = tech.trim(), date = date.trim(), jobType = jobType.trim().ifBlank { "General Service Call" }))
+        onSave(visit.copy(clientName = client.trim(), projectName = project.trim(), technicianName = tech.trim(), date = date.trim(), jobType = jobType.trim().ifBlank { "General Service Call" }, clientType = clientType.trim().ifBlank { "General Business" }))
     }) {
         FormTextField("Client / Site Name", client) { client = it }
         FormTextField("Project Name", project) { project = it }
         FormTextField("Technician Name", tech) { tech = it }
         FormTextField("Date", date) { date = it }
+        SimpleDropdown("Client Type", clientType, CLIENT_TYPES) { clientType = it }
         SimpleDropdown("Job Type", jobType, JOB_TYPES) { jobType = it }
+        TemplatePreviewCard(auditTemplateFor(clientType))
     }
 }
 
@@ -1826,8 +1953,14 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     line("Project: ${visit.projectName}")
     line("Technician: ${visit.technicianName}")
     line("Date: ${visit.date}")
+    line("Client Type: ${visit.clientTypeLabel}")
     line("Job Type: ${visit.jobType}")
     line(visit.summary())
+    val auditTemplate = auditTemplateFor(visit.clientTypeLabel)
+    section("MSP Client Template")
+    line(auditTemplate.summary)
+    line("Core Systems: ${auditTemplate.coreSystems.joinToString(", ").take(90)}")
+    auditTemplate.keyQuestions.take(5).forEachIndexed { index, question -> line("Q${index + 1}: $question") }
 
     if (options.includeNotes) {
         section("Notes")

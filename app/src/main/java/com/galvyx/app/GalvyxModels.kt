@@ -230,6 +230,7 @@ data class SiteVisit(
     val technicianName: String = "",
     val date: String = "",
     val jobType: String = "General Service Call",
+    val clientType: String = "General Business",
     val notes: List<VisitNote> = emptyList(),
     val devices: List<DeviceInfo> = emptyList(),
     val expenses: List<VisitExpense> = emptyList(),
@@ -239,6 +240,9 @@ data class SiteVisit(
         get() = listOf(clientName, projectName).filter { it.isNotBlank() }.joinToString(" • ").ifBlank { "Untitled Visit" }
 
     fun summary(): String = "${notes.size} notes • ${devices.size} devices • ${expenses.size} expenses • ${photos.size} photos"
+
+    val clientTypeLabel: String
+        get() = clientType.ifBlank { "General Business" }
 
     val expenseBreakdown: ExpenseBreakdown
         get() {
@@ -270,6 +274,7 @@ data class SiteVisit(
             technicianName,
             date,
             jobType,
+            clientTypeLabel,
             notes.joinToString(" ") { listOf(it.location, it.category, it.title, it.notes).joinToString(" ") },
             devices.joinToString(" ") { listOf(it.location, it.deviceType, it.manufacturer, it.model, it.serialNumber, it.macAddress, it.ipAddress, it.hostname, it.notes).joinToString(" ") },
             expenses.joinToString(" ") { listOf(it.date, it.category, it.vendor, it.amount, it.paymentMethod, it.notes, it.receiptCountLabel).joinToString(" ") },
@@ -284,6 +289,7 @@ data class SiteVisit(
         .put("technicianName", technicianName)
         .put("date", date)
         .put("jobType", jobType)
+        .put("clientType", clientTypeLabel)
         .put("notes", notes.toJsonArray { it.toJson() })
         .put("devices", devices.toJsonArray { it.toJson() })
         .put("expenses", expenses.toJsonArray { it.toJson() })
@@ -297,6 +303,7 @@ data class SiteVisit(
             technicianName = json.optString("technicianName"),
             date = json.optString("date"),
             jobType = json.optString("jobType", "General Service Call"),
+            clientType = json.optString("clientType", "General Business"),
             notes = json.optJSONArray("notes").toList { VisitNote.fromJson(it) },
             devices = json.optJSONArray("devices").toList { DeviceInfo.fromJson(it) },
             expenses = json.optJSONArray("expenses").toList { VisitExpense.fromJson(it) },
