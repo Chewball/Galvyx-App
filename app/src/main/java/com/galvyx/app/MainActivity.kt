@@ -2088,17 +2088,53 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
         y += gap
     }
 
-    fun wrapped(text: String) {
-        val words = text.replace('\n', ' ').split(' ')
+    fun wrappedLines(text: String, maxChars: Int = 88): List<String> {
+        val words = text.replace('\n', ' ').split(' ').filter { it.isNotBlank() }
+        val rows = mutableListOf<String>()
         var current = ""
         for (word in words) {
             val next = if (current.isBlank()) word else "$current $word"
-            if (next.length > 88) {
-                line(current)
+            if (next.length > maxChars && current.isNotBlank()) {
+                rows += current
                 current = word
             } else current = next
         }
-        if (current.isNotBlank()) line(current)
+        if (current.isNotBlank()) rows += current
+        return rows
+    }
+
+    fun wrapped(text: String) {
+        wrappedLines(text).forEach { line(it) }
+    }
+
+    fun drawImageBlock(title: String, caption: String, bitmap: Bitmap?, fallbackPath: String) {
+        val titleRows = wrappedLines(title, 88).ifEmpty { listOf("Photo") }
+        val captionRows = wrappedLines(caption, 88)
+        if (bitmap == null) {
+            titleRows.forEach { line(it) }
+            line(fallbackPath)
+            captionRows.forEach { line(it) }
+            return
+        }
+
+        val maxWidth = 528f
+        val reservedTextHeight = (titleRows.size * 17f) + (captionRows.size * 15f) + 30f
+        val availablePageHeight = 724f - 48f - reservedTextHeight
+        val maxHeight = minOf(520f, availablePageHeight.coerceAtLeast(260f))
+        val widthScale = maxWidth / bitmap.width.toFloat()
+        val heightScale = maxHeight / bitmap.height.toFloat()
+        val scale = minOf(widthScale, heightScale)
+        val width = bitmap.width * scale
+        val height = bitmap.height * scale
+        val blockHeight = reservedTextHeight + height
+
+        if (y + blockHeight > 724f) newPage()
+        titleRows.forEach { line(it, bodyPaint, 17f) }
+        val left = 42f + ((maxWidth - width) / 2f)
+        canvas.drawBitmap(bitmap, null, android.graphics.RectF(left, y, left + width, y + height), imagePaint)
+        y += height + 10f
+        captionRows.forEach { row -> line(row, bodyPaint, 15f) }
+        y += 8f
     }
 
     fun section(title: String) {
@@ -2118,12 +2154,6 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     line("Job Type: ${visit.jobType}")
     line("Export Mode: ${options.exportMode} • Photo Quality: ${options.photoQuality} • Photos: ${options.photosToInclude}")
     line(visit.summary())
-    val auditTemplate = auditTemplateFor(visit.clientTypeLabel)
-    section("MSP Client Template")
-    line(auditTemplate.summary)
-    line("Core Systems: ${auditTemplate.coreSystems.joinToString(", ").take(90)}")
-    auditTemplate.keyQuestions.take(5).forEachIndexed { index, question -> line("Q${index + 1}: $question") }
-
     section("Core Systems Summary")
     val coreRows = visit.coreSystems.summaryRows
     if (coreRows.isEmpty()) line("No core systems captured.")
@@ -2181,24 +2211,13 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
             wrapped(expense.notes)
             if (options.includeExpenseReceipts) {
                 expense.receiptPhotoPaths.forEachIndexed { receiptIndex, receiptPath ->
-                    line("Receipt scan ${receiptIndex + 1} - full size for reimbursement review")
                     val receiptBitmap = loadBitmapForPdf(context, receiptPath, 0, options, isReceipt = true)
-                    if (receiptBitmap != null) {
-                        if (y > 250f) newPage()
-                        val maxWidth = 528f
-                        val maxHeight = 620f
-                        val widthScale = maxWidth / receiptBitmap.width.toFloat()
-                        val heightScale = maxHeight / receiptBitmap.height.toFloat()
-                        val scale = minOf(widthScale, heightScale)
-                        val width = receiptBitmap.width * scale
-                        val height = receiptBitmap.height * scale
-                        val left = 42f + ((maxWidth - width) / 2f)
-                        canvas.drawBitmap(receiptBitmap, null, android.graphics.RectF(left, y, left + width, y + height), imagePaint)
-                        y += height + 18f
-                        if (y > 680f) newPage()
-                    } else {
-                        line(receiptPath)
-                    }
+                    drawImageBlock(
+                        title = "Receipt scan ${receiptIndex + 1} - full size for reimbursement review",
+                        caption = "",
+                        bitmap = receiptBitmap,
+                        fallbackPath = receiptPath
+                    )
                 }
             }
             y += 5f
@@ -2215,25 +2234,15 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
             .forEach { (category, categoryPhotos) ->
                 line(category, headerPaint, 20f)
                 categoryPhotos.forEachIndexed { index, photo ->
-                    val title = "${index + 1}. ${photo.stage.ifBlank { "Reference" }}${if (photo.isKeyPhoto) " • Key" else ""}${if (photo.caption.isNotBlank()) ": ${photo.caption}" else ""}"
-                    line(title)
+                    val title = "${index + 1}. ${photo.stage.ifBlank { "Reference" }}${if (photo.isKeyPhoto) " • Key" else ""}"
+                    val caption = photo.caption.ifBlank { photo.reportLabel }
                     val bitmap = loadBitmapForPdf(context, photo.path, photo.rotationDegrees, options)
-                    if (bitmap != null) {
-                        if (y > 250f) newPage()
-                        val maxWidth = 528f
-                        val maxHeight = 620f
-                        val widthScale = maxWidth / bitmap.width.toFloat()
-                        val heightScale = maxHeight / bitmap.height.toFloat()
-                        val scale = minOf(widthScale, heightScale)
-                        val width = bitmap.width * scale
-                        val height = bitmap.height * scale
-                        val left = 42f + ((maxWidth - width) / 2f)
-                        canvas.drawBitmap(bitmap, null, android.graphics.RectF(left, y, left + width, y + height), imagePaint)
-                        y += height + 18f
-                        if (y > 680f) newPage()
-                    } else {
-                        line(photo.path)
-                    }
+                    drawImageBlock(
+                        title = title,
+                        caption = caption,
+                        bitmap = bitmap,
+                        fallbackPath = photo.path
+                    )
                 }
             }
     }
