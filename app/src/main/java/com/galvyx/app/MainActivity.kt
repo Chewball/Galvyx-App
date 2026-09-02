@@ -2061,6 +2061,8 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; isFakeBoldText = true }
     val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 16f; isFakeBoldText = true }
     val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f }
+    val photoTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f; isFakeBoldText = true }
+    val photoNotePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 10f }
     val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9f }
     val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
     var pageNumber = 1
@@ -2108,33 +2110,43 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     }
 
     fun drawImageBlock(title: String, caption: String, bitmap: Bitmap?, fallbackPath: String) {
-        val titleRows = wrappedLines(title, 88).ifEmpty { listOf("Photo") }
-        val captionRows = wrappedLines(caption, 88)
+        val titleRows = wrappedLines(title, 32).ifEmpty { listOf("Photo") }
+        val noteRows = if (caption.isBlank()) emptyList() else listOf("Photo notes:") + wrappedLines(caption, 30)
         if (bitmap == null) {
             titleRows.forEach { line(it) }
             line(fallbackPath)
-            captionRows.forEach { line(it) }
+            noteRows.forEach { line(it) }
             return
         }
 
-        val maxWidth = 528f
-        val reservedTextHeight = (titleRows.size * 17f) + (captionRows.size * 15f) + 30f
-        val availablePageHeight = 724f - 48f - reservedTextHeight
-        val maxHeight = minOf(520f, availablePageHeight.coerceAtLeast(260f))
-        val widthScale = maxWidth / bitmap.width.toFloat()
+        val imageMaxWidth = 320f
+        val noteLeft = 382f
+        val textHeight = (titleRows.size * 15f) + (noteRows.size * 13f) + 16f
+        val maxHeight = 320f
+        val widthScale = imageMaxWidth / bitmap.width.toFloat()
         val heightScale = maxHeight / bitmap.height.toFloat()
         val scale = minOf(widthScale, heightScale)
         val width = bitmap.width * scale
         val height = bitmap.height * scale
-        val blockHeight = reservedTextHeight + height
+        val blockHeight = maxOf(height, textHeight) + 18f
 
         if (y + blockHeight > 724f) newPage()
-        titleRows.forEach { line(it, bodyPaint, 17f) }
-        val left = 42f + ((maxWidth - width) / 2f)
-        canvas.drawBitmap(bitmap, null, android.graphics.RectF(left, y, left + width, y + height), imagePaint)
-        y += height + 10f
-        captionRows.forEach { row -> line(row, bodyPaint, 15f) }
-        y += 8f
+        val blockTop = y
+        val imageLeft = 42f + ((imageMaxWidth - width) / 2f)
+        canvas.drawBitmap(bitmap, null, android.graphics.RectF(imageLeft, blockTop, imageLeft + width, blockTop + height), imagePaint)
+
+        var textY = blockTop + 13f
+        titleRows.forEach { row ->
+            canvas.drawText(row.take(32), noteLeft, textY, photoTitlePaint)
+            textY += 15f
+        }
+        if (noteRows.isNotEmpty()) textY += 4f
+        noteRows.forEachIndexed { index, row ->
+            val paint = if (index == 0) photoTitlePaint else photoNotePaint
+            canvas.drawText(row.take(34), noteLeft, textY, paint)
+            textY += 13f
+        }
+        y = blockTop + blockHeight
     }
 
     fun section(title: String) {
@@ -2234,8 +2246,13 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
             .forEach { (category, categoryPhotos) ->
                 line(category, headerPaint, 20f)
                 categoryPhotos.forEachIndexed { index, photo ->
-                    val title = "${index + 1}. ${photo.stage.ifBlank { "Reference" }}${if (photo.isKeyPhoto) " • Key" else ""}"
-                    val caption = photo.caption.ifBlank { photo.reportLabel }
+                    val selectedStage = photo.stage.takeIf { it.isNotBlank() && !it.equals("Reference", ignoreCase = true) }
+                    val title = listOfNotNull(
+                        "Photo ${index + 1}",
+                        selectedStage,
+                        if (photo.isKeyPhoto) "Key" else null
+                    ).joinToString(" • ")
+                    val caption = photo.caption
                     val bitmap = loadBitmapForPdf(context, photo.path, photo.rotationDegrees, options)
                     drawImageBlock(
                         title = title,
