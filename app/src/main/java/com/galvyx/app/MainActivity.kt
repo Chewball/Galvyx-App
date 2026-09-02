@@ -47,6 +47,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -66,6 +67,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -104,6 +106,9 @@ import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val PREFS_NAME = "galvyx_local_store"
 private const val PREF_VISITS = "visits"
@@ -237,6 +242,7 @@ data class PdfExportOptions(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalvyxApp(context: Context) {
+    val coroutineScope = rememberCoroutineScope()
     val prefs = remember { context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE) }
     val visits = remember { mutableStateListOf<SiteVisit>().also { it.addAll(visitsFromJson(prefs.getString(PREF_VISITS, null))) } }
     var profile by remember {
@@ -251,6 +257,7 @@ fun GalvyxApp(context: Context) {
     var dialog by rememberSaveable { mutableStateOf(DialogKind.None) }
     var editingItemId by rememberSaveable { mutableStateOf<String?>(null) }
     var deleteRequest by remember { mutableStateOf<DeleteRequest?>(null) }
+    var isExportingPdf by remember { mutableStateOf(false) }
     var pendingPhotoPath by rememberSaveable { mutableStateOf<String?>(null) }
     var pendingPhotoUri by remember { mutableStateOf<Uri?>(null) }
     var pendingExpenseReceiptId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -582,11 +589,22 @@ fun GalvyxApp(context: Context) {
             )
             DialogKind.ExportOptions -> PdfExportOptionsDialog(
                 visit = visit,
+                isExporting = isExportingPdf,
                 onDismiss = { dialog = DialogKind.None },
                 onExport = { options ->
-                    val report = exportVisitPdf(context, visit, profile, options)
-                    dialog = DialogKind.None
-                    if (report != null) shareReport(context, report) else Toast.makeText(context, "PDF export failed", Toast.LENGTH_LONG).show()
+                    if (!isExportingPdf) {
+                        isExportingPdf = true
+                        val visitSnapshot = visit
+                        val profileSnapshot = profile
+                        coroutineScope.launch {
+                            val report = withContext(Dispatchers.IO) {
+                                exportVisitPdf(context.applicationContext, visitSnapshot, profileSnapshot, options)
+                            }
+                            isExportingPdf = false
+                            dialog = DialogKind.None
+                            if (report != null) shareReport(context, report) else Toast.makeText(context, "PDF export failed", Toast.LENGTH_LONG).show()
+                        }
+                    }
                 }
             )
             DialogKind.None -> Unit
@@ -1213,7 +1231,7 @@ fun DeviceDialog(existing: DeviceInfo? = null, onDismiss: () -> Unit, onSave: (D
 }
 
 @Composable
-fun PdfExportOptionsDialog(visit: SiteVisit, onDismiss: () -> Unit, onExport: (PdfExportOptions) -> Unit) {
+fun PdfExportOptionsDialog(visit: SiteVisit, isExporting: Boolean = false, onDismiss: () -> Unit, onExport: (PdfExportOptions) -> Unit) {
     var exportMode by rememberSaveable { mutableStateOf("Email-Friendly PDF") }
     var photoQuality by rememberSaveable { mutableStateOf("Medium") }
     var photosToInclude by rememberSaveable { mutableStateOf(if (visit.photos.any { it.isKeyPhoto }) "Key Photos Only" else "All Photos") }
@@ -1231,6 +1249,12 @@ fun PdfExportOptionsDialog(visit: SiteVisit, onDismiss: () -> Unit, onExport: (P
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Control report size so big photo-heavy visits can still be emailed.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+                if (isExporting) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                        Text("Creating PDF in the background. Large photo reports may take a minute.", color = GalvyxCyan, fontSize = 12.sp)
+                    }
+                }
                 if (visit.photos.size >= 12) HintText("Size warning: this visit has ${visit.photos.size} photos. Email-friendly mode with key photos is recommended.")
                 SimpleDropdown("Export Mode", exportMode, listOf("Email-Friendly PDF", "Full Evidence PDF")) { mode ->
                     exportMode = mode
@@ -1258,7 +1282,7 @@ fun PdfExportOptionsDialog(visit: SiteVisit, onDismiss: () -> Unit, onExport: (P
             }
         },
         confirmButton = {
-            Button(onClick = {
+            Button(enabled = !isExporting, onClick = {
                 onExport(
                     PdfExportOptions(
                         includeNotes = includeNotes,
@@ -1271,9 +1295,9 @@ fun PdfExportOptionsDialog(visit: SiteVisit, onDismiss: () -> Unit, onExport: (P
                         photosToInclude = photosToInclude
                     )
                 )
-            }) { Text("Create PDF") }
+            }) { Text(if (isExporting) "Creating..." else "Create PDF") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        dismissButton = { TextButton(enabled = !isExporting, onClick = onDismiss) { Text("Cancel") } }
     )
 }
 
@@ -2141,12 +2165,12 @@ private fun createReportTarget(context: Context, profile: CompanyProfile, displa
 }
 
 private fun loadBitmapForPdf(context: Context, reference: String, manualRotationDegrees: Int = 0, options: PdfExportOptions, isReceipt: Boolean = false): Bitmap? {
-    val source = loadBitmap(context, reference, manualRotationDegrees) ?: return null
     val targetMaxDimension = if (isReceipt && options.exportMode == "Full Evidence PDF") {
         maxOf(options.maxPdfImageDimension, 1800)
     } else {
         options.maxPdfImageDimension
     }
+    val source = loadScaledBitmap(context, reference, targetMaxDimension, manualRotationDegrees) ?: return null
     val maxSide = maxOf(source.width, source.height)
     val scaled = if (maxSide > targetMaxDimension) {
         val scale = targetMaxDimension.toFloat() / maxSide.toFloat()
@@ -2160,6 +2184,30 @@ private fun loadBitmapForPdf(context: Context, reference: String, manualRotation
         BitmapFactory.decodeByteArray(output.toByteArray(), 0, output.size()) ?: scaled
     }
 }
+
+private fun loadScaledBitmap(context: Context, reference: String, targetMaxDimension: Int, manualRotationDegrees: Int = 0): Bitmap? = runCatching {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    if (reference.startsWith("content://")) {
+        context.contentResolver.openInputStream(Uri.parse(reference))?.use { BitmapFactory.decodeStream(it, null, bounds) }
+    } else {
+        BitmapFactory.decodeFile(reference, bounds)
+    }
+    val sourceMaxSide = maxOf(bounds.outWidth, bounds.outHeight)
+    if (sourceMaxSide <= 0) return@runCatching loadBitmap(context, reference, manualRotationDegrees)
+
+    var sampleSize = 1
+    while ((sourceMaxSide / (sampleSize * 2)) >= targetMaxDimension) {
+        sampleSize *= 2
+    }
+    val decodeOptions = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+    val decoded = if (reference.startsWith("content://")) {
+        context.contentResolver.openInputStream(Uri.parse(reference))?.use { BitmapFactory.decodeStream(it, null, decodeOptions) }
+    } else {
+        BitmapFactory.decodeFile(reference, decodeOptions)
+    } ?: return@runCatching null
+    val autoRotation = readExifRotationDegrees(context, reference)
+    decoded.rotateBitmap((autoRotation + manualRotationDegrees).normalizedRotationDegrees())
+}.getOrNull()
 
 private fun loadBitmap(context: Context, reference: String, manualRotationDegrees: Int = 0): Bitmap? = runCatching {
     val bitmap = if (reference.startsWith("content://")) {
