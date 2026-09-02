@@ -2109,10 +2109,14 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
         wrappedLines(text).forEach { line(it) }
     }
 
-    fun drawImageBlock(title: String, caption: String, bitmap: Bitmap?, fallbackPath: String) {
+    fun drawImageBlock(title: String, caption: String, bitmap: Bitmap?, fallbackPath: String, categoryLabel: String = "") {
+        val categoryRows = wrappedLines(categoryLabel, 42)
         val titleRows = wrappedLines(title, 32).ifEmpty { listOf("Photo") }
         val noteRows = if (caption.isBlank()) emptyList() else listOf("Photo notes:") + wrappedLines(caption, 30)
         if (bitmap == null) {
+            val fallbackHeight = (categoryRows.size * 16f) + (titleRows.size * 15f) + 17f + (noteRows.size * 13f) + 12f
+            if (y + fallbackHeight > 724f) newPage()
+            categoryRows.forEach { line(it, headerPaint, 16f) }
             titleRows.forEach { line(it) }
             line(fallbackPath)
             noteRows.forEach { line(it) }
@@ -2121,6 +2125,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
 
         val hasNotes = noteRows.isNotEmpty()
         val imageMaxWidth = if (hasNotes) 390f else 528f
+        val categoryHeight = if (categoryRows.isEmpty()) 0f else (categoryRows.size * 16f) + 6f
         val imageMaxHeight = if (hasNotes) 430f else 560f
         val noteLeft = 448f
         val textHeight = (titleRows.size * 15f) + (noteRows.size * 13f) + 16f
@@ -2129,15 +2134,22 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
         val scale = minOf(widthScale, heightScale)
         val width = bitmap.width * scale
         val height = bitmap.height * scale
-        val blockHeight = if (hasNotes) maxOf(height, textHeight) + 18f else height + (titleRows.size * 15f) + 22f
+        val mediaHeight = if (hasNotes) maxOf(height, textHeight) + 18f else height + (titleRows.size * 15f) + 22f
+        val blockHeight = categoryHeight + mediaHeight
 
         if (y + blockHeight > 724f) newPage()
         val blockTop = y
+        var categoryY = blockTop + 13f
+        categoryRows.forEach { row ->
+            canvas.drawText(row.take(42), 42f, categoryY, headerPaint)
+            categoryY += 16f
+        }
+        val mediaTop = blockTop + categoryHeight
         val imageLeft = 42f + ((imageMaxWidth - width) / 2f)
-        canvas.drawBitmap(bitmap, null, android.graphics.RectF(imageLeft, blockTop, imageLeft + width, blockTop + height), imagePaint)
+        canvas.drawBitmap(bitmap, null, android.graphics.RectF(imageLeft, mediaTop, imageLeft + width, mediaTop + height), imagePaint)
 
         if (hasNotes) {
-            var textY = blockTop + 13f
+            var textY = mediaTop + 13f
             titleRows.forEach { row ->
                 canvas.drawText(row.take(22), noteLeft, textY, photoTitlePaint)
                 textY += 15f
@@ -2149,7 +2161,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
                 textY += 13f
             }
         } else {
-            var textY = blockTop + height + 12f
+            var textY = mediaTop + height + 12f
             titleRows.forEach { row ->
                 canvas.drawText(row.take(88), 42f, textY, photoTitlePaint)
                 textY += 15f
@@ -2253,7 +2265,6 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
         reportPhotos
             .groupBy { it.category.ifBlank { "General" } }
             .forEach { (category, categoryPhotos) ->
-                line(category, headerPaint, 20f)
                 categoryPhotos.forEachIndexed { index, photo ->
                     val selectedStage = photo.stage.takeIf { it.isNotBlank() && !it.equals("Reference", ignoreCase = true) }
                     val title = listOfNotNull(
@@ -2267,7 +2278,8 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
                         title = title,
                         caption = caption,
                         bitmap = bitmap,
-                        fallbackPath = photo.path
+                        fallbackPath = photo.path,
+                        categoryLabel = category
                     )
                 }
             }
