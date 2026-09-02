@@ -234,16 +234,16 @@ data class PdfExportOptions(
 
     val maxPdfImageDimension: Int
         get() = when (photoQuality) {
-            "Small" -> 1024
-            "Original / Archive" -> 2400
-            else -> 1600
+            "Small" -> 1400
+            "Original / Archive" -> 3600
+            else -> 2400
         }
 
     val jpegQuality: Int
         get() = when (photoQuality) {
-            "Small" -> 65
-            "Original / Archive" -> 92
-            else -> 78
+            "Small" -> 78
+            "Original / Archive" -> 96
+            else -> 88
         }
 }
 
@@ -2119,32 +2119,41 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
             return
         }
 
-        val imageMaxWidth = 320f
-        val noteLeft = 382f
+        val hasNotes = noteRows.isNotEmpty()
+        val imageMaxWidth = if (hasNotes) 390f else 528f
+        val imageMaxHeight = if (hasNotes) 430f else 560f
+        val noteLeft = 448f
         val textHeight = (titleRows.size * 15f) + (noteRows.size * 13f) + 16f
-        val maxHeight = 320f
         val widthScale = imageMaxWidth / bitmap.width.toFloat()
-        val heightScale = maxHeight / bitmap.height.toFloat()
+        val heightScale = imageMaxHeight / bitmap.height.toFloat()
         val scale = minOf(widthScale, heightScale)
         val width = bitmap.width * scale
         val height = bitmap.height * scale
-        val blockHeight = maxOf(height, textHeight) + 18f
+        val blockHeight = if (hasNotes) maxOf(height, textHeight) + 18f else height + (titleRows.size * 15f) + 22f
 
         if (y + blockHeight > 724f) newPage()
         val blockTop = y
         val imageLeft = 42f + ((imageMaxWidth - width) / 2f)
         canvas.drawBitmap(bitmap, null, android.graphics.RectF(imageLeft, blockTop, imageLeft + width, blockTop + height), imagePaint)
 
-        var textY = blockTop + 13f
-        titleRows.forEach { row ->
-            canvas.drawText(row.take(32), noteLeft, textY, photoTitlePaint)
-            textY += 15f
-        }
-        if (noteRows.isNotEmpty()) textY += 4f
-        noteRows.forEachIndexed { index, row ->
-            val paint = if (index == 0) photoTitlePaint else photoNotePaint
-            canvas.drawText(row.take(34), noteLeft, textY, paint)
-            textY += 13f
+        if (hasNotes) {
+            var textY = blockTop + 13f
+            titleRows.forEach { row ->
+                canvas.drawText(row.take(22), noteLeft, textY, photoTitlePaint)
+                textY += 15f
+            }
+            textY += 4f
+            noteRows.forEachIndexed { index, row ->
+                val paint = if (index == 0) photoTitlePaint else photoNotePaint
+                canvas.drawText(row.take(24), noteLeft, textY, paint)
+                textY += 13f
+            }
+        } else {
+            var textY = blockTop + height + 12f
+            titleRows.forEach { row ->
+                canvas.drawText(row.take(88), 42f, textY, photoTitlePaint)
+                textY += 15f
+            }
         }
         y = blockTop + blockHeight
     }
