@@ -2229,45 +2229,55 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     }
 
     if (options.includeExpenses) {
-        section("Expenses")
+        section("Expenses & Receipts")
         if (visit.expenses.isEmpty()) line("No expenses captured.")
         if (visit.expenses.isNotEmpty()) {
             val breakdown = visit.expenseBreakdown
-            line("Expense Total: ${breakdown.total.toCurrencyString()}", headerPaint, 22f)
-            line("Reimbursable: ${breakdown.reimbursableTotal.toCurrencyString()} • Company Paid: ${breakdown.companyPaidTotal.toCurrencyString()}")
-            line("With Receipts: ${breakdown.receiptAttachedTotal.toCurrencyString()} • Missing Receipts: ${breakdown.missingReceiptTotal.toCurrencyString()}")
-            line("Receipt Scans: ${breakdown.receiptScanCount} • Expenses Missing Receipts: ${breakdown.missingReceiptCount}")
-            line("By Category", headerPaint, 20f)
-            breakdown.byCategory.forEach { line("${it.label}: ${it.total.toCurrencyString()} (${it.count})") }
-            line("By Payment", headerPaint, 20f)
-            breakdown.byPaymentMethod.forEach { line("${it.label}: ${it.total.toCurrencyString()} (${it.count})") }
-            y += 4f
+            line("Total: ${breakdown.total.toCurrencyString()}", headerPaint, 22f)
+            if (breakdown.byCategory.isNotEmpty()) {
+                line("By Category", headerPaint, 20f)
+                breakdown.byCategory.forEach { line("${it.label}: ${it.total.toCurrencyString()} (${it.count})") }
+            }
+            line("Receipts: ${breakdown.receiptScanCount} attached • ${breakdown.missingReceiptCount} missing")
+            y += 6f
         }
         visit.expenses.forEachIndexed { index, expense ->
-            val expenseTitle = "${index + 1}. ${expense.vendor} ${expense.amount}".trim().ifBlank { "${index + 1}. ${expense.category}" }
-            val expenseDetails = listOf(expense.date, expense.category, expense.paymentMethod, expense.receiptCountLabel)
-                .filter { it.isNotBlank() }
-                .joinToString(" • ")
-            line(expenseTitle, bodyPaint.apply { isFakeBoldText = true })
-            bodyPaint.isFakeBoldText = false
-            line(expenseDetails)
-            wrapped(expense.notes)
-            if (options.includeExpenseReceipts) {
+            val amount = expense.amount.ifBlank { "No amount" }
+            val vendor = expense.vendor.ifBlank { expense.category.ifBlank { "Expense" } }
+            val category = expense.category.ifBlank { "Other" }
+            val payment = expense.paymentMethod.ifBlank { "Payment not specified" }
+            val date = expense.date.ifBlank { "No date" }
+            val expenseLabel = "${index + 1}. $category • $vendor • $amount"
+            val expenseDetails = "$date • $payment"
+            val hasReceiptImages = options.includeExpenseReceipts && expense.receiptPhotoPaths.isNotEmpty()
+
+            if (hasReceiptImages) {
                 expense.receiptPhotoPaths.forEachIndexed { receiptIndex, receiptPath ->
                     val receiptBitmap = loadBitmapForPdf(context, receiptPath, 0, options, isReceipt = true)
-                    val receiptCaption = listOf(expenseDetails, expense.notes)
-                        .filter { it.isNotBlank() }
-                        .joinToString("\n")
+                    val receiptTitle = if (expense.receiptPhotoPaths.size > 1) {
+                        "Receipt ${receiptIndex + 1}: $vendor • $amount"
+                    } else {
+                        "$vendor • $amount"
+                    }
                     drawImageBlock(
-                        title = "Receipt ${receiptIndex + 1} for ${expense.vendor.ifBlank { expense.category }} ${expense.amount}".trim(),
-                        caption = receiptCaption,
+                        title = receiptTitle,
+                        caption = listOf(expenseDetails, expense.notes).filter { it.isNotBlank() }.joinToString("\n"),
                         bitmap = receiptBitmap,
                         fallbackPath = receiptPath,
-                        categoryLabel = expenseTitle
+                        categoryLabel = expenseLabel
                     )
                 }
+            } else {
+                val rows = listOf(expenseLabel, expenseDetails, expense.notes).filter { it.isNotBlank() }
+                val textBlockHeight = 18f + rows.sumOf { wrappedLines(it).size }.toFloat() * 17f + 8f
+                if (y + textBlockHeight > 724f) newPage()
+                line(expenseLabel, bodyPaint.apply { isFakeBoldText = true })
+                bodyPaint.isFakeBoldText = false
+                line(expenseDetails)
+                wrapped(expense.notes)
+                if (expense.receiptPhotoPaths.isEmpty()) line("Receipt: missing")
+                y += 5f
             }
-            y += 5f
         }
     }
 
