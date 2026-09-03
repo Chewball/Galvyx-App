@@ -134,6 +134,12 @@ class GalvyxModelsTest {
     }
 
     @Test
+    fun pdfExportOptionsHideCoreSystemsByDefault() {
+        assertEquals(false, PdfExportOptions().includeCoreSystems)
+        assertEquals(true, PdfExportOptions(includeCoreSystems = true).includeCoreSystems)
+    }
+
+    @Test
     fun companyProfileJsonRoundTripPreservesStorageSettings() {
         val profile = CompanyProfile(
             companyName = "Acme Field Services",

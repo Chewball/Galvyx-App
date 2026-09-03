@@ -220,6 +220,7 @@ private data class DeleteRequest(val kind: DeleteKind, val id: String, val title
 private data class ExportedReport(val uri: Uri, val displayName: String)
 private data class ReportTarget(val uri: Uri, val displayName: String, val outputStream: OutputStream)
 data class PdfExportOptions(
+    val includeCoreSystems: Boolean = false,
     val includeNotes: Boolean = true,
     val includeDevices: Boolean = true,
     val includeExpenses: Boolean = true,
@@ -1325,6 +1326,7 @@ fun PdfExportOptionsDialog(visit: SiteVisit, isExporting: Boolean = false, onDis
     var exportMode by rememberSaveable { mutableStateOf("Email-Friendly PDF") }
     var photoQuality by rememberSaveable { mutableStateOf("Medium") }
     var photosToInclude by rememberSaveable { mutableStateOf(if (visit.photos.any { it.isKeyPhoto }) "Key Photos Only" else "All Photos") }
+    var includeCoreSystems by rememberSaveable { mutableStateOf(false) }
     var includeNotes by rememberSaveable { mutableStateOf(true) }
     var includeDevices by rememberSaveable { mutableStateOf(true) }
     var includeExpenses by rememberSaveable { mutableStateOf(true) }
@@ -1332,7 +1334,7 @@ fun PdfExportOptionsDialog(visit: SiteVisit, isExporting: Boolean = false, onDis
     var includePhotos by rememberSaveable { mutableStateOf(true) }
     val keyPhotoCount = visit.photos.count { it.isKeyPhoto }
     val selectedPhotoCount = if (photosToInclude == "Key Photos Only") keyPhotoCount else visit.photos.size
-    val atLeastOneDetail = includeNotes || includeDevices || includeExpenses || includePhotos
+    val atLeastOneDetail = includeCoreSystems || includeNotes || includeDevices || includeExpenses || includePhotos
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Export / Share Report") },
@@ -1359,6 +1361,7 @@ fun PdfExportOptionsDialog(visit: SiteVisit, isExporting: Boolean = false, onDis
                 SimpleDropdown("Photo Quality", photoQuality, listOf("Small", "Medium", "Original / Archive")) { photoQuality = it }
                 SimpleDropdown("Photos", photosToInclude, listOf("Key Photos Only", "All Photos")) { photosToInclude = it }
                 Text("Selected for PDF: $selectedPhotoCount of ${visit.photos.size} photo(s). Key photos: $keyPhotoCount.", color = GalvyxCyan, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                ExportOptionRow("Core Systems", "Optional internal/platform inventory", includeCoreSystems) { includeCoreSystems = it }
                 ExportOptionRow("Notes", "${visit.notes.size} note(s)", includeNotes) { includeNotes = it }
                 ExportOptionRow("Devices", "${visit.devices.size} device(s)", includeDevices) { includeDevices = it }
                 ExportOptionRow("Expenses", "${visit.expenses.size} expense(s)", includeExpenses) { checked ->
@@ -1375,6 +1378,7 @@ fun PdfExportOptionsDialog(visit: SiteVisit, isExporting: Boolean = false, onDis
             Button(enabled = !isExporting, onClick = {
                 onExport(
                     PdfExportOptions(
+                        includeCoreSystems = includeCoreSystems,
                         includeNotes = includeNotes,
                         includeDevices = includeDevices,
                         includeExpenses = includeExpenses,
@@ -2187,10 +2191,12 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     line("Job Type: ${visit.jobType}")
     line("Export Mode: ${options.exportMode} • Photo Quality: ${options.photoQuality} • Photos: ${options.photosToInclude}")
     line(visit.summary())
-    section("Core Systems Summary")
-    val coreRows = visit.coreSystems.summaryRows
-    if (coreRows.isEmpty()) line("No core systems captured.")
-    coreRows.forEach { (label, value) -> wrapped("$label: $value") }
+    if (options.includeCoreSystems) {
+        section("Core Systems Summary")
+        val coreRows = visit.coreSystems.summaryRows
+        if (coreRows.isEmpty()) line("No core systems captured.")
+        coreRows.forEach { (label, value) -> wrapped("$label: $value") }
+    }
 
     if (options.includeNotes) {
         section("Notes")
@@ -2238,18 +2244,26 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
             y += 4f
         }
         visit.expenses.forEachIndexed { index, expense ->
-            line("${index + 1}. ${expense.vendor} ${expense.amount}".trim(), bodyPaint.apply { isFakeBoldText = true })
+            val expenseTitle = "${index + 1}. ${expense.vendor} ${expense.amount}".trim().ifBlank { "${index + 1}. ${expense.category}" }
+            val expenseDetails = listOf(expense.date, expense.category, expense.paymentMethod, expense.receiptCountLabel)
+                .filter { it.isNotBlank() }
+                .joinToString(" • ")
+            line(expenseTitle, bodyPaint.apply { isFakeBoldText = true })
             bodyPaint.isFakeBoldText = false
-            line("${expense.date} • ${expense.category} • ${expense.paymentMethod} • ${expense.receiptCountLabel}")
+            line(expenseDetails)
             wrapped(expense.notes)
             if (options.includeExpenseReceipts) {
                 expense.receiptPhotoPaths.forEachIndexed { receiptIndex, receiptPath ->
                     val receiptBitmap = loadBitmapForPdf(context, receiptPath, 0, options, isReceipt = true)
+                    val receiptCaption = listOf(expenseDetails, expense.notes)
+                        .filter { it.isNotBlank() }
+                        .joinToString("\n")
                     drawImageBlock(
-                        title = "Receipt scan ${receiptIndex + 1} - full size for reimbursement review",
-                        caption = "",
+                        title = "Receipt ${receiptIndex + 1} for ${expense.vendor.ifBlank { expense.category }} ${expense.amount}".trim(),
+                        caption = receiptCaption,
                         bitmap = receiptBitmap,
-                        fallbackPath = receiptPath
+                        fallbackPath = receiptPath,
+                        categoryLabel = expenseTitle
                     )
                 }
             }
