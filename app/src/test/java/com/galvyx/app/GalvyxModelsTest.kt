@@ -1,6 +1,8 @@
 package com.galvyx.app
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GalvyxModelsTest {
@@ -193,5 +195,121 @@ class GalvyxModelsTest {
         assertEquals("Reset", restored?.visits?.first()?.clientName)
         assertEquals("MDF", restored?.visits?.first()?.notes?.first()?.title)
         assertEquals("Rack", restored?.visits?.first()?.photos?.first()?.caption)
+    }
+
+    @Test
+    fun hotelAuditItemsRoundTripWithStableIdsAndStatuses() {
+        val item = HotelAuditItem(
+            id = "audit-123",
+            building = "Tower A",
+            floor = "3",
+            roomArea = "Room 301",
+            category = "Guest Rooms",
+            requiredEvidence = "Photograph each room type and document network/TV/phone endpoints",
+            status = HotelAuditStatus.INACCESSIBLE,
+            notes = "Occupied during audit"
+        )
+
+        val restored = visitsFromJson(visitsToJson(listOf(SiteVisit(hotelAuditItems = listOf(item))))).single().hotelAuditItems.single()
+
+        assertEquals(item, restored)
+        assertEquals("Inaccessible", restored.status.label)
+    }
+
+    @Test
+    fun oldVisitJsonWithoutHotelAuditItemsRemainsCompatible() {
+        val oldJson = """[{"id":"old-visit","clientName":"Legacy Hotel","clientType":"Hotel / Hospitality"}]"""
+
+        val restored = visitsFromJson(oldJson).single()
+
+        assertEquals("old-visit", restored.id)
+        assertTrue(restored.hotelAuditItems.isEmpty())
+        assertEquals(0, restored.hotelAuditCoverage.total)
+        assertEquals(0, restored.hotelAuditCoverage.completionPercentage)
+    }
+
+    @Test
+    fun siteVisitJsonNormalizesBlankHotelAuditItemIds() {
+        val raw = """[{"hotelAuditItems":[{"id":"","roomArea":"Lobby"},{"id":"   ","roomArea":"MDF"}]}]"""
+
+        val restored = visitsFromJson(raw).single().hotelAuditItems
+
+        assertTrue(restored.all { it.id.isNotBlank() })
+        assertEquals(restored.size, restored.map { it.id }.distinct().size)
+    }
+
+    @Test
+    fun siteVisitJsonNormalizesDuplicateHotelAuditItemIdsAndPreservesUniqueIds() {
+        val raw = """[{"hotelAuditItems":[{"id":"audit-1","roomArea":"Lobby"},{"id":"audit-1","roomArea":"MDF"},{"id":"audit-2","roomArea":"Roof"}]}]"""
+
+        val restored = visitsFromJson(raw).single().hotelAuditItems
+        val ids = restored.map { it.id }
+
+        assertEquals(ids.size, ids.distinct().size)
+        assertEquals("audit-1", restored[0].id)
+        assertEquals("audit-2", restored[2].id)
+    }
+
+    @Test
+    fun hotelAuditCoverageCountsOnlyCompleteAndKeepsAllGapsVisible() {
+        val items = listOf(
+            HotelAuditItem(roomArea = "Lobby", status = HotelAuditStatus.COMPLETE),
+            HotelAuditItem(roomArea = "MDF", status = HotelAuditStatus.COMPLETE),
+            HotelAuditItem(roomArea = "IDF 1", status = HotelAuditStatus.PENDING),
+            HotelAuditItem(roomArea = "IDF 2", status = HotelAuditStatus.INACCESSIBLE),
+            HotelAuditItem(roomArea = "Roof", status = HotelAuditStatus.DEFERRED)
+        )
+
+        val summary = SiteVisit(hotelAuditItems = items).hotelAuditCoverage
+
+        assertEquals(5, summary.total)
+        assertEquals(2, summary.complete)
+        assertEquals(1, summary.pending)
+        assertEquals(1, summary.inaccessible)
+        assertEquals(1, summary.deferred)
+        assertEquals(40, summary.completionPercentage)
+        assertEquals(3, summary.unresolvedCount)
+        assertEquals(listOf("IDF 1", "IDF 2", "Roof"), summary.unresolvedItems.map { it.roomArea })
+    }
+
+    @Test
+    fun defaultHotelChecklistCoversRequiredPropertySystemsWithUsefulEvidence() {
+        val checklist = defaultHotelAuditChecklist()
+        val searchable = checklist.joinToString(" ") { "${it.roomArea} ${it.category} ${it.requiredEvidence}" }.lowercase()
+        val requiredTerms = listOf(
+            "exterior", "floor plan", "room list", "lobby", "front desk", "pms", "workstation",
+            "restaurant", "bar", "kitchen", "pos", "mdf", "idf", "demarc", "primary circuit",
+            "backup circuit", "low-voltage", "wi-fi", "guest room", "room type", "audio", "camera",
+            "nvr", "phone", "pbx", "iptv", "signage", "access control", "door lock", "ups", "power",
+            "inaccessible", "omitted"
+        )
+
+        assertTrue(checklist.isNotEmpty())
+        assertTrue(checklist.all { it.id.isNotBlank() && it.roomArea.isNotBlank() && it.category.isNotBlank() && it.requiredEvidence.isNotBlank() })
+        requiredTerms.forEach { term -> assertTrue("Missing checklist coverage for $term", searchable.contains(term)) }
+    }
+
+    @Test
+    fun visitSearchIncludesHotelAuditLocationEvidenceNotesAndStatus() {
+        val visit = SiteVisit(
+            hotelAuditItems = listOf(
+                HotelAuditItem(
+                    building = "Cascade Wing",
+                    floor = "Lower Level",
+                    roomArea = "Locked IDF 7",
+                    category = "Network / Wi-Fi",
+                    requiredEvidence = "Capture switch labels and AP inventory",
+                    status = HotelAuditStatus.DEFERRED,
+                    notes = "Return with facilities escort"
+                )
+            )
+        )
+
+        assertTrue(visit.matchesSearch("cascade wing"))
+        assertTrue(visit.matchesSearch("lower level"))
+        assertTrue(visit.matchesSearch("switch labels"))
+        assertTrue(visit.matchesSearch("facilities escort"))
+        assertTrue(visit.matchesSearch("deferred"))
+        assertFalse(visit.matchesSearch("ballroom projector"))
     }
 }

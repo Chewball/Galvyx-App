@@ -8,6 +8,8 @@ Use Galvyx to capture visit details, work notes, photos, device information, and
 
 - Create and manage site visit records.
 - Capture notes, devices, expenses, photos, and document-quality receipt scans.
+- Run structured Hotel / Hospitality audits with a reusable full-property checklist, building/floor/area coverage, required evidence, completion progress, and visible inaccessible/deferred gaps.
+- Add, edit, status, search, and report custom hotel coverage items; hotel PDF reports include every coverage item and unresolved area.
 - Attach one or more receipt photos to each expense.
 - Remove individual receipt scans from the expense edit dialog when the wrong receipt was attached.
 - Calculate expense totals with breakdowns by category, payment method, reimbursement status, and receipt coverage.

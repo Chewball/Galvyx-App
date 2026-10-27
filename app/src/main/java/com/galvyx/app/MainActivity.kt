@@ -53,6 +53,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 
@@ -214,8 +215,8 @@ class MainActivity : ComponentActivity() {
 }
 
 private enum class Screen { Home, NewVisit, Recent, VisitDetail, Settings }
-private enum class DialogKind { None, Note, Device, Expense, PhotoCaption, EditVisit, EditCoreSystems, EditNote, EditDevice, EditExpense, EditPhoto, ExportOptions }
-private enum class DeleteKind { Visit, Note, Device, Expense, Photo }
+private enum class DialogKind { None, Note, Device, Expense, PhotoCaption, HotelAuditItem, EditVisit, EditCoreSystems, EditNote, EditDevice, EditExpense, EditPhoto, EditHotelAuditItem, ExportOptions }
+private enum class DeleteKind { Visit, Note, Device, Expense, Photo, HotelAuditItem }
 private data class DeleteRequest(val kind: DeleteKind, val id: String, val title: String)
 private data class ExportedReport(val uri: Uri, val displayName: String)
 private data class ReportTarget(val uri: Uri, val displayName: String, val outputStream: OutputStream)
@@ -495,6 +496,10 @@ fun GalvyxApp(context: Context) {
                         onDeleteDevice = { device -> deleteRequest = DeleteRequest(DeleteKind.Device, device.id, device.hostname.ifBlank { device.deviceType }) },
                         onDeleteExpense = { expense -> deleteRequest = DeleteRequest(DeleteKind.Expense, expense.id, expense.vendor.ifBlank { expense.category }) },
                         onDeletePhoto = { photo -> deleteRequest = DeleteRequest(DeleteKind.Photo, photo.id, photo.caption.ifBlank { "Photo" }) },
+                        onInitializeHotelAudit = { upsertVisit(visit.copy(hotelAuditItems = defaultHotelAuditChecklist())) },
+                        onAddHotelAuditItem = { dialog = DialogKind.HotelAuditItem },
+                        onEditHotelAuditItem = { item -> editingItemId = item.id; dialog = DialogKind.EditHotelAuditItem },
+                        onDeleteHotelAuditItem = { item -> deleteRequest = DeleteRequest(DeleteKind.HotelAuditItem, item.id, item.roomArea.ifBlank { item.category }) },
                         onExport = { dialog = DialogKind.ExportOptions }
                     )
                 } ?: EmptyState("Visit not found", "Go back and choose a recent site visit.")
@@ -602,6 +607,17 @@ fun GalvyxApp(context: Context) {
                     dialog = DialogKind.None
                 }
             )
+            DialogKind.HotelAuditItem -> HotelAuditItemDialog(
+                onDismiss = { dialog = DialogKind.None },
+                onSave = { item -> upsertVisit(visit.copy(hotelAuditItems = visit.hotelAuditItems + item)); dialog = DialogKind.None }
+            )
+            DialogKind.EditHotelAuditItem -> visit.hotelAuditItems.firstOrNull { it.id == editingItemId }?.let { existing ->
+                HotelAuditItemDialog(
+                    existing = existing,
+                    onDismiss = { editingItemId = null; dialog = DialogKind.None },
+                    onSave = { item -> upsertVisit(visit.copy(hotelAuditItems = visit.hotelAuditItems.map { if (it.id == item.id) item else it })); editingItemId = null; dialog = DialogKind.None }
+                )
+            }
             DialogKind.ExportOptions -> PdfExportOptionsDialog(
                 visit = visit,
                 isExporting = isExportingPdf,
@@ -646,10 +662,17 @@ fun GalvyxApp(context: Context) {
                         current.photos.firstOrNull { it.id == request.id }?.let { deleteAppOwnedPhoto(context, it.path, profile) }
                         upsertVisit(current.copy(photos = current.photos.filterNot { it.id == request.id }))
                     }
+                    DeleteKind.HotelAuditItem -> selectedVisit()?.let { current ->
+                        upsertVisit(current.copy(hotelAuditItems = current.hotelAuditItems.filterNot { it.id == request.id }))
+                    }
                 }
                 persistVisits()
                 deleteRequest = null
-                Toast.makeText(context, "Deleted ${request.kind.name.lowercase(Locale.US)}", Toast.LENGTH_SHORT).show()
+                val deletedItemLabel = when (request.kind) {
+                    DeleteKind.HotelAuditItem -> "hotel audit item"
+                    else -> request.kind.name.lowercase(Locale.US)
+                }
+                Toast.makeText(context, "Deleted $deletedItemLabel", Toast.LENGTH_SHORT).show()
             }
         )
     }
@@ -1018,6 +1041,10 @@ fun VisitDetailScreen(
     onDeleteDevice: (DeviceInfo) -> Unit,
     onDeleteExpense: (VisitExpense) -> Unit,
     onDeletePhoto: (VisitPhoto) -> Unit,
+    onInitializeHotelAudit: () -> Unit,
+    onAddHotelAuditItem: () -> Unit,
+    onEditHotelAuditItem: (HotelAuditItem) -> Unit,
+    onDeleteHotelAuditItem: (HotelAuditItem) -> Unit,
     onExport: () -> Unit
 ) {
     val expenseBreakdown = visit.expenseBreakdown
@@ -1057,6 +1084,22 @@ fun VisitDetailScreen(
         }
         item { TemplateDetailCard(template) }
         item { CoreSystemsCard(visit.coreSystems, onEdit = onEditCoreSystems) }
+        if (visit.clientTypeLabel == "Hotel / Hospitality") {
+            item {
+                HotelAuditCoverageCard(
+                    visit = visit,
+                    onInitialize = onInitializeHotelAudit,
+                    onAddItem = onAddHotelAuditItem
+                )
+            }
+            items(visit.hotelAuditItems, key = { "hotel-audit-${it.id}" }) { auditItem ->
+                HotelAuditItemCard(
+                    item = auditItem,
+                    onEdit = { onEditHotelAuditItem(auditItem) },
+                    onDelete = { onDeleteHotelAuditItem(auditItem) }
+                )
+            }
+        }
         if (visit.expenses.isNotEmpty()) item { ExpenseBreakdownCard(expenseBreakdown) }
         item { SectionHeader("Notes", visit.notes.size) }
         if (visit.notes.isEmpty()) item { SmallEmpty("No notes yet") }
@@ -1082,6 +1125,51 @@ fun VisitDetailScreen(
         if (visit.photos.isEmpty()) item { SmallEmpty("No photos yet") }
         items(visit.photos, key = { it.id }) { photo ->
             PhotoDetailCard(photo = photo, onEdit = { onEditPhoto(photo) }, onDelete = { onDeletePhoto(photo) })
+        }
+    }
+}
+
+@Composable
+fun HotelAuditCoverageCard(visit: SiteVisit, onInitialize: () -> Unit, onAddItem: () -> Unit) {
+    val coverage = visit.hotelAuditCoverage
+    CardPanel {
+        Text("Hotel Audit Coverage", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        if (coverage.total == 0) {
+            Text("No structured coverage items yet. Start with the reusable full-property checklist or add a custom area.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Button(onClick = onInitialize, modifier = Modifier.fillMaxWidth()) { Text("Initialize Default Hotel Checklist") }
+        } else {
+            Text("${coverage.complete} of ${coverage.total} complete • ${coverage.completionPercentage}%", color = GalvyxCyan, fontWeight = FontWeight.Bold)
+            LinearProgressIndicator(
+                progress = { coverage.completionPercentage / 100f },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                "Pending ${coverage.pending} • Inaccessible ${coverage.inaccessible} • Deferred ${coverage.deferred} • ${coverage.unresolvedCount} unresolved",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (coverage.unresolvedCount > 0) HintText("Inaccessible and deferred locations remain visible as audit gaps and do not count as complete.")
+        }
+        OutlinedButton(onClick = onAddItem, modifier = Modifier.fillMaxWidth()) { Text("Add Custom Coverage Item") }
+    }
+}
+
+@Composable
+fun HotelAuditItemCard(item: HotelAuditItem, onEdit: () -> Unit, onDelete: () -> Unit) {
+    val location = listOf(item.building, item.floor, item.roomArea).filter { it.isNotBlank() }.joinToString(" • ").ifBlank { "Location not set" }
+    CardPanel {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(item.roomArea.ifBlank { item.category.ifBlank { "Audit item" } }, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                Text(location, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            }
+            NeonPill(item.status.label, if (item.status == HotelAuditStatus.COMPLETE) GalvyxAlienGreen else GalvyxVioletBright)
+        }
+        Text("Category: ${item.category.ifBlank { "Not set" }}", fontWeight = FontWeight.SemiBold)
+        Text("Required evidence: ${item.requiredEvidence.ifBlank { "Not set" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (item.notes.isNotBlank()) Text("Notes: ${item.notes}")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = onEdit, modifier = Modifier.weight(1f)) { Text("Edit / Status") }
+            TextButton(onClick = onDelete, modifier = Modifier.weight(1f)) { Text("Delete") }
         }
     }
 }
@@ -1274,13 +1362,51 @@ fun VisitDialog(visit: SiteVisit, onDismiss: () -> Unit, onSave: (SiteVisit) -> 
 
 @Composable
 private fun ConfirmDeleteDialog(request: DeleteRequest, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    val kindLabel = when (request.kind) {
+        DeleteKind.HotelAuditItem -> "hotel audit item"
+        else -> request.kind.name.lowercase(Locale.US)
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Delete ${request.kind.name.lowercase(Locale.US)}?") },
+        title = { Text("Delete $kindLabel?") },
         text = { Text("This will remove \"${request.title}\" from this device. This cannot be undone.") },
         confirmButton = { Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("Delete") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
+
+@Composable
+fun HotelAuditItemDialog(existing: HotelAuditItem? = null, onDismiss: () -> Unit, onSave: (HotelAuditItem) -> Unit) {
+    var building by rememberSaveable(existing?.id) { mutableStateOf(existing?.building.orEmpty()) }
+    var floor by rememberSaveable(existing?.id) { mutableStateOf(existing?.floor.orEmpty()) }
+    var roomArea by rememberSaveable(existing?.id) { mutableStateOf(existing?.roomArea.orEmpty()) }
+    var category by rememberSaveable(existing?.id) { mutableStateOf(existing?.category.orEmpty()) }
+    var requiredEvidence by rememberSaveable(existing?.id) { mutableStateOf(existing?.requiredEvidence.orEmpty()) }
+    var status by rememberSaveable(existing?.id) { mutableStateOf(existing?.status?.label ?: HotelAuditStatus.PENDING.label) }
+    var notes by rememberSaveable(existing?.id) { mutableStateOf(existing?.notes.orEmpty()) }
+    FormDialog(if (existing == null) "Add Hotel Audit Item" else "Edit Hotel Audit Item", onDismiss, onSave = {
+        if (roomArea.isBlank() || category.isBlank() || requiredEvidence.isBlank()) return@FormDialog
+        onSave(
+            (existing ?: HotelAuditItem()).copy(
+                building = building.trim(),
+                floor = floor.trim(),
+                roomArea = roomArea.trim(),
+                category = category.trim(),
+                requiredEvidence = requiredEvidence.trim(),
+                status = HotelAuditStatus.fromRaw(status),
+                notes = notes.trim()
+            )
+        )
+    }) {
+        HintText("Room / area, category, and required evidence are required. Use status and notes to make every coverage gap explicit.")
+        FormTextField("Building", building) { building = it }
+        FormTextField("Floor", floor) { floor = it }
+        FormTextField("Room / Area", roomArea) { roomArea = it }
+        FormTextField("Category", category) { category = it }
+        FormTextField("Required Evidence", requiredEvidence, minLines = 3) { requiredEvidence = it }
+        SimpleDropdown("Status", status, HotelAuditStatus.values().map { it.label }) { status = it }
+        FormTextField("Notes / Gap Reason", notes, minLines = 3) { notes = it }
+    }
 }
 
 @Composable
@@ -2065,6 +2191,7 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f; isFakeBoldText = true }
     val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 16f; isFakeBoldText = true }
     val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f }
+    val auditStatusPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f; isFakeBoldText = true }
     val photoTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f; isFakeBoldText = true }
     val photoNotePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 10f }
     val footerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9f }
@@ -2191,6 +2318,29 @@ private fun exportVisitPdf(context: Context, visit: SiteVisit, profile: CompanyP
     line("Job Type: ${visit.jobType}")
     line("Export Mode: ${options.exportMode} • Photo Quality: ${options.photoQuality} • Photos: ${options.photosToInclude}")
     line(visit.summary())
+    if (visit.clientTypeLabel == "Hotel / Hospitality" && visit.hotelAuditItems.isNotEmpty()) {
+        val coverage = visit.hotelAuditCoverage
+        section("Hotel Audit Coverage")
+        line("${coverage.complete} of ${coverage.total} complete (${coverage.completionPercentage}%)")
+        line("Pending: ${coverage.pending} • Inaccessible: ${coverage.inaccessible} • Deferred: ${coverage.deferred} • Unresolved: ${coverage.unresolvedCount}")
+        visit.hotelAuditItems.forEachIndexed { index, item ->
+            val location = listOf(item.building, item.floor, item.roomArea).filter { it.isNotBlank() }.joinToString(" • ").ifBlank { "Not set" }
+            val headingRows = wrappedLines("${index + 1}. ${item.roomArea.ifBlank { "Area not set" }}")
+            val statusRows = wrappedLines("Status: ${item.status.label}")
+            val detailRows = buildList {
+                addAll(wrappedLines("Location: $location"))
+                addAll(wrappedLines("Category: ${item.category.ifBlank { "Not set" }}"))
+                addAll(wrappedLines("Required evidence: ${item.requiredEvidence.ifBlank { "Not set" }}"))
+                if (item.notes.isNotBlank()) addAll(wrappedLines("Notes / gap: ${item.notes}"))
+            }
+            val auditBlockHeight = (headingRows.size + statusRows.size + detailRows.size) * 17f + 5f
+            if (y + auditBlockHeight > 724f) newPage()
+            headingRows.forEach { line(it, auditStatusPaint) }
+            statusRows.forEach { line(it, auditStatusPaint) }
+            detailRows.forEach { line(it) }
+            y += 5f
+        }
+    }
     if (options.includeCoreSystems) {
         section("Core Systems Summary")
         val coreRows = visit.coreSystems.summaryRows

@@ -37,6 +37,12 @@ Current app behavior:
 - [ ] Add, edit, and delete a device.
 - [ ] Add, edit, and delete an expense.
 - [ ] Add, edit, and delete a photo caption.
+- [ ] Create a Hotel / Hospitality visit and initialize the default Hotel Audit Coverage checklist.
+- [ ] Confirm coverage totals/progress update when items are marked Complete, Pending, Inaccessible, and Deferred; inaccessible/deferred items remain unresolved.
+- [ ] Add and edit a custom hotel item with building, floor, room/area, category, evidence, status, and notes; confirm deletion requires confirmation.
+- [ ] Search for hotel audit location, evidence, notes, and status text.
+- [ ] Export a hotel PDF and confirm every coverage item and all incomplete/inaccessible/deferred gaps appear in Hotel Audit Coverage.
+- [ ] Close/reopen the hotel visit and confirm checklist data and statuses persist.
 - [ ] Search visits by client, project, device, note, expense, and photo-caption text.
 - [ ] Filter recent visits by job type.
 - [ ] Export/share a PDF and confirm page footers/page numbers appear on longer reports.

@@ -287,6 +287,108 @@ data class CoreSystems(
     }
 }
 
+enum class HotelAuditStatus(val label: String) {
+    PENDING("Pending"),
+    COMPLETE("Complete"),
+    INACCESSIBLE("Inaccessible"),
+    DEFERRED("Deferred");
+
+    companion object {
+        fun fromRaw(raw: String?): HotelAuditStatus = values().firstOrNull {
+            it.name.equals(raw, ignoreCase = true) || it.label.equals(raw, ignoreCase = true)
+        } ?: PENDING
+    }
+}
+
+data class HotelAuditItem(
+    val id: String = UUID.randomUUID().toString(),
+    val building: String = "",
+    val floor: String = "",
+    val roomArea: String = "",
+    val category: String = "",
+    val requiredEvidence: String = "",
+    val status: HotelAuditStatus = HotelAuditStatus.PENDING,
+    val notes: String = ""
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("id", id)
+        .put("building", building)
+        .put("floor", floor)
+        .put("roomArea", roomArea)
+        .put("category", category)
+        .put("requiredEvidence", requiredEvidence)
+        .put("status", status.name)
+        .put("notes", notes)
+
+    companion object {
+        fun fromJson(json: JSONObject): HotelAuditItem = HotelAuditItem(
+            id = json.optString("id").takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString(),
+            building = json.optString("building"),
+            floor = json.optString("floor"),
+            roomArea = json.optString("roomArea"),
+            category = json.optString("category"),
+            requiredEvidence = json.optString("requiredEvidence"),
+            status = HotelAuditStatus.fromRaw(json.optString("status")),
+            notes = json.optString("notes")
+        )
+    }
+}
+
+private fun List<HotelAuditItem>.withUniqueNonblankIds(): List<HotelAuditItem> {
+    val usedIds = mutableSetOf<String>()
+    return map { item ->
+        if (item.id.isNotBlank() && usedIds.add(item.id)) {
+            item
+        } else {
+            var replacementId: String
+            do {
+                replacementId = UUID.randomUUID().toString()
+            } while (!usedIds.add(replacementId))
+            item.copy(id = replacementId)
+        }
+    }
+}
+
+data class HotelAuditCoverage(
+    val total: Int,
+    val complete: Int,
+    val pending: Int,
+    val inaccessible: Int,
+    val deferred: Int,
+    val completionPercentage: Int,
+    val unresolvedItems: List<HotelAuditItem>
+) {
+    val unresolvedCount: Int get() = unresolvedItems.size
+}
+
+fun defaultHotelAuditChecklist(): List<HotelAuditItem> {
+    fun item(area: String, category: String, evidence: String) = HotelAuditItem(
+        roomArea = area,
+        category = category,
+        requiredEvidence = evidence
+    )
+    return listOf(
+        item("Exterior and property grounds", "Property Overview", "Exterior/property photos of every building, entrance, service area, and major outdoor technology location."),
+        item("Property records", "Plans and Inventory", "Obtain maps, floor plans, and current room list; reconcile buildings, floors, room types, and support areas."),
+        item("Lobby and front desk", "PMS / Front Desk", "Photos and inventory of lobby/front desk, PMS stations, key encoders, printers, and continuity workflow."),
+        item("Administrative and staff areas", "Workstations / Peripherals", "Inventory workstations and peripherals with model, serial, connection, user/role, and condition."),
+        item("Restaurant, bar, and kitchen", "POS / Food and Beverage", "Photos and inventory of restaurant/bar/kitchen POS, payment terminals, printers, KDS, and network connections."),
+        item("Main distribution frame (MDF)", "MDF", "Wide and detailed MDF photos; rack elevations, device labels, ports, patching, power, cooling, and ownership."),
+        item("Every intermediate distribution frame (IDF)", "IDF", "Locate and inspect every IDF; capture room/door, wide rack view, equipment, labels, patching, power, and cooling."),
+        item("ISP demarc", "Internet Circuits", "Photograph ISP/demarc equipment and labels; record carrier, account/support details, primary circuit and backup circuit handoffs."),
+        item("Low-voltage pathways", "Cabling / Pathways", "Photograph and describe low-voltage pathways, risers, conduits, cable types, labeling, capacity, and visible defects."),
+        item("Property network and Wi-Fi", "Network / Wi-Fi", "Document topology, gateways, switches, VLANs, AP models/locations, management platform, guest/staff separation, and coverage gaps."),
+        item("Guest rooms and room types", "Guest Rooms", "Inspect representative guest rooms for every room type and floor; photograph and document network, Wi-Fi, phone, TV, and lock endpoints."),
+        item("Public and back-of-house audio", "Speakers / Audio Zones", "Document speakers, amplifiers, sources, controls, and every audio zone with equipment and location photos."),
+        item("Security coverage", "Cameras / NVR", "Inventory cameras and NVR/DVR systems; capture models, views, retention, storage, network/power, and visible coverage gaps."),
+        item("Telephony", "Phones / PBX", "Inventory phones, PBX, gateways, analog lines, emergency phones, extensions, carrier handoffs, and support ownership."),
+        item("Guest entertainment and displays", "IPTV / TV / Signage", "Document IPTV headend, TVs, casting, channel delivery, digital signage players/displays, network, and support ownership."),
+        item("Controlled doors", "Access Control / Door Locks", "Inventory access control panels, readers, door locks, key encoders, integrations, power, network, and management systems."),
+        item("Technology power", "UPS / Power", "Photograph UPS/power protection for MDF, every IDF, servers, PBX, NVR, and critical operations; record load, age, and condition."),
+        item("Coverage reconciliation", "Inaccessible / Omitted Areas", "Reconcile every inaccessible or omitted area against maps, floor plans, room list, and IDF list; record reason, owner, and return plan.")
+    )
+}
+
 data class SiteVisit(
     val id: String = UUID.randomUUID().toString(),
     val clientName: String = "",
@@ -299,7 +401,8 @@ data class SiteVisit(
     val notes: List<VisitNote> = emptyList(),
     val devices: List<DeviceInfo> = emptyList(),
     val expenses: List<VisitExpense> = emptyList(),
-    val photos: List<VisitPhoto> = emptyList()
+    val photos: List<VisitPhoto> = emptyList(),
+    val hotelAuditItems: List<HotelAuditItem> = emptyList()
 ) {
     val title: String
         get() = listOf(clientName, projectName).filter { it.isNotBlank() }.joinToString(" • ").ifBlank { "Untitled Visit" }
@@ -308,6 +411,21 @@ data class SiteVisit(
 
     val clientTypeLabel: String
         get() = clientType.ifBlank { "General Business" }
+
+    val hotelAuditCoverage: HotelAuditCoverage
+        get() {
+            val complete = hotelAuditItems.count { it.status == HotelAuditStatus.COMPLETE }
+            val unresolved = hotelAuditItems.filter { it.status != HotelAuditStatus.COMPLETE }
+            return HotelAuditCoverage(
+                total = hotelAuditItems.size,
+                complete = complete,
+                pending = hotelAuditItems.count { it.status == HotelAuditStatus.PENDING },
+                inaccessible = hotelAuditItems.count { it.status == HotelAuditStatus.INACCESSIBLE },
+                deferred = hotelAuditItems.count { it.status == HotelAuditStatus.DEFERRED },
+                completionPercentage = if (hotelAuditItems.isEmpty()) 0 else complete * 100 / hotelAuditItems.size,
+                unresolvedItems = unresolved
+            )
+        }
 
     val expenseBreakdown: ExpenseBreakdown
         get() {
@@ -344,7 +462,8 @@ data class SiteVisit(
             notes.joinToString(" ") { listOf(it.location, it.category, it.title, it.notes).joinToString(" ") },
             devices.joinToString(" ") { listOf(it.location, it.deviceType, it.manufacturer, it.model, it.serialNumber, it.macAddress, it.ipAddress, it.hostname, it.notes).joinToString(" ") },
             expenses.joinToString(" ") { listOf(it.date, it.category, it.vendor, it.amount, it.paymentMethod, it.notes, it.receiptCountLabel).joinToString(" ") },
-            photos.joinToString(" ") { listOf(it.category, it.stage, it.caption, if (it.isKeyPhoto) "key photo" else "").joinToString(" ") }
+            photos.joinToString(" ") { listOf(it.category, it.stage, it.caption, if (it.isKeyPhoto) "key photo" else "").joinToString(" ") },
+            hotelAuditItems.joinToString(" ") { listOf(it.building, it.floor, it.roomArea, it.category, it.requiredEvidence, it.status.label, it.notes).joinToString(" ") }
         ).joinToString(" ").lowercase().contains(normalized)
     }
 
@@ -361,6 +480,7 @@ data class SiteVisit(
         .put("devices", devices.toJsonArray { it.toJson() })
         .put("expenses", expenses.toJsonArray { it.toJson() })
         .put("photos", photos.toJsonArray { it.toJson() })
+        .put("hotelAuditItems", hotelAuditItems.toJsonArray { it.toJson() })
 
     companion object {
         fun fromJson(json: JSONObject): SiteVisit = SiteVisit(
@@ -375,7 +495,10 @@ data class SiteVisit(
             notes = json.optJSONArray("notes").toList { VisitNote.fromJson(it) },
             devices = json.optJSONArray("devices").toList { DeviceInfo.fromJson(it) },
             expenses = json.optJSONArray("expenses").toList { VisitExpense.fromJson(it) },
-            photos = json.optJSONArray("photos").toList { VisitPhoto.fromJson(it) }
+            photos = json.optJSONArray("photos").toList { VisitPhoto.fromJson(it) },
+            hotelAuditItems = json.optJSONArray("hotelAuditItems")
+                .toList { HotelAuditItem.fromJson(it) }
+                .withUniqueNonblankIds()
         )
     }
 }
